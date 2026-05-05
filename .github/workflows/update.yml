@@ -27,14 +27,15 @@ jobs:
           DATABRICKS_HOST:      ${{ secrets.DATABRICKS_HOST }}
           DATABRICKS_TOKEN:     ${{ secrets.DATABRICKS_TOKEN }}
           DATABRICKS_HTTP_PATH: ${{ secrets.DATABRICKS_HTTP_PATH }}
-          OUTPUT_PATH:          bolt_dashboard.html
-        run: python gen_dashboard.py
+          OUTPUT_PATH:          dist/bolt_dashboard.html
+        run: |
+          mkdir -p dist
+          python gen_dashboard.py
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token:   ${{ secrets.GITHUB_TOKEN }}
           publish_branch: gh-pages
-          publish_dir:    .
-          include_files:  bolt_dashboard.html
+          publish_dir:    dist
           commit_message: "chore: daily dashboard update [skip ci]"
