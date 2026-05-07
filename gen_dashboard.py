@@ -354,6 +354,23 @@ tbody td:first-child{font-weight:600;color:var(--d)}
     </div>
   </div>
 
+  <!-- PRICING COMPETITIVENESS -->
+  <div class="chart-card" id="pricing-section">
+    <div class="card-header">
+      <div>
+        <div class="card-title">⚡ Pricing Gap vs Competitors — Performance by Region</div>
+        <div class="chart-note">Positive = Bolt more expensive · Negative = Bolt cheaper · Surge included</div>
+      </div>
+    </div>
+    <div class="pricing-controls">
+      <div>
+        <div class="pricing-flabel">CITY</div>
+        <select class="pricing-select" id="p-city" onchange="onPCity()"></select>
+      </div>
+    </div>
+    <div id="pricing-body"></div>
+  </div>
+
   <!-- GENERAL DASHBOARD -->
   <div class="sec-section">
     <div class="sec-hdr">General Dashboard</div>
@@ -374,26 +391,6 @@ tbody td:first-child{font-weight:600;color:var(--d)}
     <div class="hist-scroll"><table class="hist-tbl" id="hist-tbl"></table></div>
   </div>
 
-  <!-- PRICING COMPETITIVENESS -->
-  <div class="chart-card" id="pricing-section">
-    <div class="card-header">
-      <div>
-        <div class="card-title">⚡ Pricing Gap vs Competitors — Performance by Region</div>
-        <div class="chart-note">Positive = Bolt more expensive · Negative = Bolt cheaper · Surge included</div>
-      </div>
-    </div>
-    <div class="pricing-controls">
-      <div>
-        <div class="pricing-flabel">City</div>
-        <select class="pricing-select" id="p-city" onchange="onPCity()"></select>
-      </div>
-      <div>
-        <div class="pricing-flabel">Region</div>
-        <select class="pricing-select" id="p-region" onchange="renderPricing()"></select>
-      </div>
-    </div>
-    <div id="pricing-body"></div>
-  </div>
 
 </div>
 <script>
@@ -1170,17 +1167,6 @@ function onDate(){S.df=document.getElementById('df').value;S.dt=document.getElem
 // ── PRICING SECTION ───────────────────────────────────────────────────
 const _pCharts = {};
 function onPCity(){
-  const city = document.getElementById('p-city').value;
-  const sel  = document.getElementById('p-region');
-  sel.innerHTML = '';
-  const cfg = PRICING_DATA[city];
-  if(!cfg){renderPricing();return;}
-  cfg.regions.forEach(r=>{
-    const o=document.createElement('option');
-    o.value=r; o.textContent=r;
-    if(r===cfg.default_region) o.selected=true;
-    sel.appendChild(o);
-  });
   renderPricing();
 }
 function initPricingCity(){
@@ -1196,19 +1182,13 @@ function initPricingCity(){
 }
 function renderPricing(){
   const city   = document.getElementById('p-city').value;
-  const region = document.getElementById('p-region').value;
   const body   = document.getElementById('pricing-body');
   const cfg    = PRICING_DATA[city];
   if(!cfg||!cfg.rows||!cfg.rows.length){
     body.innerHTML='<div style="color:var(--muted);padding:24px 0;text-align:center">No pricing data available for this city.</div>';
     return;
   }
-  // Find rows for this region (or all rows if only one region)
-  const rows = cfg.rows.filter(r=>r.region===region);
-  if(!rows.length){
-    body.innerHTML='<div style="color:var(--muted);padding:24px 0;text-align:center">No data for selected region.</div>';
-    return;
-  }
+  const rows = cfg.rows;
   const h   = cfg.col_headers||{};
   const lbl1wd = h.i||'Comp 1 · Weekday';
   const lbl1we = h.j||'Comp 1 · Weekend';
