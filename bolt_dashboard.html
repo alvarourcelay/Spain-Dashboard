@@ -1065,22 +1065,37 @@ function onDate(){S.df=document.getElementById('df').value;S.dt=document.getElem
 
 // ── PRICING SECTION ───────────────────────────────────────────────────
 const _pCharts = {};
-function onPCity(){
-  const city = document.getElementById('p-city').value;
-  const sel  = document.getElementById('p-region');
-  sel.innerHTML = '';
+const UBER_COLOR = 'rgba(156,163,175,0.85)';   // gray
+const CAB_COLOR  = 'rgba(196,167,240,0.85)';   // light purple
+
+// Track whether user has manually picked a city in the pricing dropdown.
+// Resets to false whenever the main city selection changes.
+let _pCityOverride = false;
+
+function _populatePRegion(city){
+  const sel = document.getElementById('p-region');
+  if(!sel) return;
+  sel.innerHTML='';
   const cfg = PRICING_DATA[city];
-  if(!cfg){renderPricing();return;}
+  if(!cfg) return;
   cfg.regions.forEach(r=>{
     const o=document.createElement('option');
     o.value=r; o.textContent=r;
     if(r===cfg.default_region) o.selected=true;
     sel.appendChild(o);
   });
+}
+
+function onPCity(){
+  _pCityOverride = true;
+  const city = document.getElementById('p-city').value;
+  _populatePRegion(city);
   renderPricing();
 }
+
 function initPricingCity(){
   const cs = document.getElementById('p-city');
+  if(!cs) return;
   cs.innerHTML='';
   const cities = Object.keys(PRICING_DATA);
   if(!cities.length){
@@ -1088,12 +1103,34 @@ function initPricingCity(){
     return;
   }
   cities.forEach(c=>{const o=document.createElement('option');o.value=c;o.textContent=c;cs.appendChild(o);});
-  onPCity();
+  syncPricingCity();
 }
+
+// Called from renderAll() every time the main city selection changes.
+function syncPricingCity(){
+  _pCityOverride = false;
+  const pCityEl = document.getElementById('p-city');
+  if(!pCityEl) return;
+  if(S.cities.length === 1 && PRICING_DATA[S.cities[0]]){
+    pCityEl.value = S.cities[0];
+    _populatePRegion(S.cities[0]);
+  }
+  renderPricing();
+}
+
 function renderPricing(){
+  const body = document.getElementById('pricing-body');
+  if(!body) return;
+
+  // If multiple cities selected and user hasn't manually overridden → show prompt
+  if(S.cities.length !== 1 && !_pCityOverride){
+    ['pc-wd','pc-we'].forEach(id=>{if(_pCharts[id]){_pCharts[id].destroy();delete _pCharts[id];}});
+    body.innerHTML='<div style="color:var(--muted);padding:32px 0;text-align:center;font-size:14px">Select a single city above to view pricing data.</div>';
+    return;
+  }
+
   const city   = document.getElementById('p-city').value;
   const region = document.getElementById('p-region').value;
-  const body   = document.getElementById('pricing-body');
   const cfg    = PRICING_DATA[city];
 
   if(!cfg||!cfg.data){
@@ -1109,15 +1146,13 @@ function renderPricing(){
   // Destroy old charts
   ['pc-wd','pc-we'].forEach(id=>{if(_pCharts[id]){_pCharts[id].destroy();delete _pCharts[id];}});
 
-  const labels  = rows.map(r=>r.week||r.date);
-  const uberWd  = rows.map(r=>r.uber_wd);
-  const uberWe  = rows.map(r=>r.uber_we);
-  const cabWd   = rows.map(r=>r.cab_wd);
-  const cabWe   = rows.map(r=>r.cab_we);
+  const labels = rows.map(r=>r.date);   // Monday date as X-axis label
+  const uberWd = rows.map(r=>r.uber_wd);
+  const uberWe = rows.map(r=>r.uber_we);
+  const cabWd  = rows.map(r=>r.cab_wd);
+  const cabWe  = rows.map(r=>r.cab_we);
 
   function fmt(v){return v==null?'N/A':(v>0?'+':'')+v.toFixed(1)+'%';}
-  const UBER_COLOR  = 'rgba(59,130,246,0.8)';
-  const CAB_COLOR   = 'rgba(234,88,12,0.8)';
 
   body.innerHTML=`
     <div class="pgap-grid">
@@ -1165,11 +1200,7 @@ function renderPricing(){
           },
           y:{
             grid:{color:'rgba(150,150,150,0.12)'},
-            ticks:{
-              color:'var(--muted)',
-              font:{size:10},
-              callback:v=>(v>0?'+':'')+v+'%'
-            }
+            ticks:{color:'var(--muted)',font:{size:10},callback:v=>(v>0?'+':'')+v+'%'}
           }
         }
       }
@@ -1186,6 +1217,7 @@ function renderAll(){
   renderPills();renderKPIs();renderSecondary();renderChart();
   for(const id of['supply','demand','pricing','general']){renderSecPills(id);renderSecChart(id);}
   renderHistoricalTable();
+  syncPricingCity();
 }
 document.getElementById('nav-badge').textContent='Data up to '+new Date(DATA_MAX+'T00:00:00').toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
 renderAll();
