@@ -367,6 +367,10 @@ tbody td:first-child{font-weight:600;color:var(--d)}
         <div class="pricing-flabel">CITY</div>
         <select class="pricing-select" id="p-city" onchange="onPCity()"></select>
       </div>
+      <div>
+        <div class="pricing-flabel">REGION</div>
+        <select class="pricing-select" id="p-region" onchange="renderPricing()"></select>
+      </div>
     </div>
     <div id="pricing-body"></div>
   </div>
@@ -1167,6 +1171,17 @@ function onDate(){S.df=document.getElementById('df').value;S.dt=document.getElem
 // ── PRICING SECTION ───────────────────────────────────────────────────
 const _pCharts = {};
 function onPCity(){
+  const city = document.getElementById('p-city').value;
+  const sel  = document.getElementById('p-region');
+  sel.innerHTML = '';
+  const cfg = PRICING_DATA[city];
+  if(!cfg){renderPricing();return;}
+  cfg.regions.forEach(r=>{
+    const o=document.createElement('option');
+    o.value=r; o.textContent=r;
+    if(r===cfg.default_region) o.selected=true;
+    sel.appendChild(o);
+  });
   renderPricing();
 }
 function initPricingCity(){
@@ -1182,73 +1197,91 @@ function initPricingCity(){
 }
 function renderPricing(){
   const city   = document.getElementById('p-city').value;
+  const region = document.getElementById('p-region').value;
   const body   = document.getElementById('pricing-body');
   const cfg    = PRICING_DATA[city];
-  if(!cfg||!cfg.rows||!cfg.rows.length){
+
+  if(!cfg||!cfg.data){
     body.innerHTML='<div style="color:var(--muted);padding:24px 0;text-align:center">No pricing data available for this city.</div>';
     return;
   }
-  const rows = cfg.rows;
-  const h   = cfg.col_headers||{};
-  const lbl1wd = h.i||'Comp 1 · Weekday';
-  const lbl1we = h.j||'Comp 1 · Weekend';
-  const lbl2wd = h.m||'Comp 2 · Weekday';
-  const lbl2we = h.n||'Comp 2 · Weekend';
+  const rows = (cfg.data[region]||[]);
+  if(!rows.length){
+    body.innerHTML='<div style="color:var(--muted);padding:24px 0;text-align:center">No data available for '+region+'.</div>';
+    return;
+  }
 
   // Destroy old charts
-  ['pc1','pc2'].forEach(id=>{if(_pCharts[id]){_pCharts[id].destroy();delete _pCharts[id];}});
+  ['pc-wd','pc-we'].forEach(id=>{if(_pCharts[id]){_pCharts[id].destroy();delete _pCharts[id];}});
 
-  // Build region labels and value arrays
-  const labels = rows.map(r=>r.region);
-  const v1wd   = rows.map(r=>r.i);
-  const v1we   = rows.map(r=>r.j);
-  const v2wd   = rows.map(r=>r.m);
-  const v2we   = rows.map(r=>r.n);
+  const labels  = rows.map(r=>r.week||r.date);
+  const uberWd  = rows.map(r=>r.uber_wd);
+  const uberWe  = rows.map(r=>r.uber_we);
+  const cabWd   = rows.map(r=>r.cab_wd);
+  const cabWe   = rows.map(r=>r.cab_we);
 
-  function barColor(vals){return vals.map(v=>v==null?'rgba(0,0,0,0)':v>0?'rgba(239,68,68,0.75)':'rgba(34,197,94,0.75)');}
   function fmt(v){return v==null?'N/A':(v>0?'+':'')+v.toFixed(1)+'%';}
+  const UBER_COLOR  = 'rgba(59,130,246,0.8)';
+  const CAB_COLOR   = 'rgba(234,88,12,0.8)';
 
   body.innerHTML=`
     <div class="pgap-grid">
       <div class="pgap-card">
-        <div class="pgap-title">${lbl1wd} vs ${lbl1we}</div>
-        <div class="pgap-chart-wrap"><canvas id="pc1"></canvas></div>
-        <div class="pgap-legend"><span class="pgap-dot" style="background:rgba(239,68,68,0.75)"></span>Bolt more expensive&nbsp;&nbsp;<span class="pgap-dot" style="background:rgba(34,197,94,0.75)"></span>Bolt cheaper</div>
+        <div class="pgap-title">Weekdays — Surge Included</div>
+        <div class="pgap-chart-wrap"><canvas id="pc-wd"></canvas></div>
+        <div class="pgap-legend">
+          <span class="pgap-dot" style="background:${UBER_COLOR}"></span>Uber
+          <span class="pgap-dot" style="background:${CAB_COLOR};margin-left:12px"></span>Cabify
+          <span style="color:var(--muted);font-size:11px;margin-left:12px">Positive = Bolt more expensive</span>
+        </div>
       </div>
       <div class="pgap-card">
-        <div class="pgap-title">${lbl2wd} vs ${lbl2we}</div>
-        <div class="pgap-chart-wrap"><canvas id="pc2"></canvas></div>
-        <div class="pgap-legend"><span class="pgap-dot" style="background:rgba(239,68,68,0.75)"></span>Bolt more expensive&nbsp;&nbsp;<span class="pgap-dot" style="background:rgba(34,197,94,0.75)"></span>Bolt cheaper</div>
+        <div class="pgap-title">Weekends — Surge Included</div>
+        <div class="pgap-chart-wrap"><canvas id="pc-we"></canvas></div>
+        <div class="pgap-legend">
+          <span class="pgap-dot" style="background:${UBER_COLOR}"></span>Uber
+          <span class="pgap-dot" style="background:${CAB_COLOR};margin-left:12px"></span>Cabify
+          <span style="color:var(--muted);font-size:11px;margin-left:12px">Positive = Bolt more expensive</span>
+        </div>
       </div>
     </div>`;
 
-  function makeChart(id, ds1vals, ds1label, ds2vals, ds2label){
-    const ctx=document.getElementById(id).getContext('2d');
-    _pCharts[id]=new Chart(ctx,{
+  function makeChart(canvasId, ds1, ds1Label, ds1Color, ds2, ds2Label, ds2Color){
+    const ctx=document.getElementById(canvasId).getContext('2d');
+    _pCharts[canvasId]=new Chart(ctx,{
       type:'bar',
       data:{
         labels,
         datasets:[
-          {label:ds1label, data:ds1vals, backgroundColor:barColor(ds1vals), borderRadius:4},
-          {label:ds2label, data:ds2vals, backgroundColor:barColor(ds2vals).map(c=>c.replace('0.75','0.45')), borderRadius:4, borderDash:[4,4]},
+          {label:ds1Label, data:ds1, backgroundColor:ds1Color, borderRadius:3},
+          {label:ds2Label, data:ds2, backgroundColor:ds2Color, borderRadius:3},
         ]
       },
       options:{
-        indexAxis:'y',
         responsive:true, maintainAspectRatio:false,
         plugins:{
-          legend:{labels:{color:'var(--text)',font:{size:11}}},
-          tooltip:{callbacks:{label:ctx=>ctx.dataset.label+': '+fmt(ctx.raw)}}
+          legend:{display:false},
+          tooltip:{callbacks:{label:c=>c.dataset.label+': '+fmt(c.raw)}}
         },
         scales:{
-          x:{grid:{color:'rgba(150,150,150,0.15)'},ticks:{color:'var(--muted)',callback:v=>(v>0?'+':'')+v+'%'},title:{display:true,text:'Gap % (+ = Bolt more expensive)',color:'var(--muted)',font:{size:10}}},
-          y:{grid:{display:false},ticks:{color:'var(--text)',font:{size:11}}}
+          x:{
+            grid:{display:false},
+            ticks:{color:'var(--muted)',font:{size:10},maxRotation:45}
+          },
+          y:{
+            grid:{color:'rgba(150,150,150,0.12)'},
+            ticks:{
+              color:'var(--muted)',
+              font:{size:10},
+              callback:v=>(v>0?'+':'')+v+'%'
+            }
+          }
         }
       }
     });
   }
-  makeChart('pc1', v1wd, lbl1wd, v1we, lbl1we);
-  makeChart('pc2', v2wd, lbl2wd, v2we, lbl2we);
+  makeChart('pc-wd', uberWd,'Uber',UBER_COLOR, cabWd,'Cabify',CAB_COLOR);
+  makeChart('pc-we', uberWe,'Uber',UBER_COLOR, cabWe,'Cabify',CAB_COLOR);
 }
 
 // ── INIT ──────────────────────────────────────────────────────────────
