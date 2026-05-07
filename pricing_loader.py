@@ -1,15 +1,23 @@
 """
 pricing_loader.py — Fetch competitor pricing gap data from Google Sheets.
 
-Reads the "Performance by region" tab (gid=1938268207) from each city's
-pricing dashboard and extracts columns I, J, M, N:
-  I = surge gap vs competitor 1, weekdays
-  J = surge gap vs competitor 1, weekends
-  M = surge gap vs competitor 2, weekdays
-  N = surge gap vs competitor 2, weekends
+Sheet structure (per city):
+  - Row 0:   top-level header ("Week actual", etc.)
+  - Row 1:   region names  (Málaga, Airport, …) — one per 14-column block
+  - Row 2:   competitor labels (Uber, Cabify, …)
+  - Row 3:   surge labels
+  - Row 4:   Weekdays / Weekend column labels
+  - Row 5+:  data rows  (col A = date YYYY-MM-DD, col B = week label W##'YY)
 
-Uses the public Google Sheets CSV export URL — no authentication required.
-The sheets must be publicly readable ("Anyone with the link can view").
+Each region occupies a block of BLOCK_SIZE (14) columns starting at FIRST_BLOCK_COL (2 = col C).
+Within each block the 4 columns of interest are at relative positions:
+  +6  → Uber    weekday  gap  (col I in block-0 / Málaga)
+  +7  → Uber    weekend  gap  (col J)
+  +10 → Cabify  weekday  gap  (col M)
+  +11 → Cabify  weekend  gap  (col N)
+
+Uses the public Google Sheets CSV export — no authentication required.
+All sheets must be publicly readable ("Anyone with the link can view").
 """
 
 import csv
@@ -17,7 +25,7 @@ import io
 import urllib.request
 import urllib.error
 
-# City → Google Sheets configuration
+# ── Sheet configuration ──────────────────────────────────────────────────────
 PRICING_SHEETS = {
     'Malaga': {
         'file_id': '16znqUuFQkNAmI6taEwrmgMLrd12mUaJox0FywaFjgTg',
@@ -51,12 +59,21 @@ PRICING_SHEETS = {
     },
 }
 
-PERF_SHEET_GID = 1938268207   # "Performance by region" tab gid
+PERF_SHEET_GID  = 1938268207  # "Performance by region" tab
 
-# Columns I, J, M, N as 0-based indices
-COL_I, COL_J, COL_M, COL_N = 8, 9, 12, 13
+BLOCK_SIZE      = 14   # columns per region block
+FIRST_BLOCK_COL = 2    # col C (0-indexed) = start of first block
+
+# Relative positions inside each block (0-indexed from block start)
+REL_UBER_WD = 6   # Uber    weekday  (col I in block-0)
+REL_UBER_WE = 7   # Uber    weekend  (col J)
+REL_CAB_WD  = 10  # Cabify  weekday  (col M)
+REL_CAB_WE  = 11  # Cabify  weekend  (col N)
+
+DATA_START_ROW = 5   # 0-indexed; rows 0-4 are header rows
 
 
+# ── Helpers ──────────────────────────────────────────────────────────────────
 def _csv_url(file_id, gid):
     return (
         f'https://docs.google.com/spreadsheets/d/{file_id}'
@@ -65,20 +82,18 @@ def _csv_url(file_id, gid):
 
 
 def _fetch_csv(url):
-    """Download a CSV URL and return a list of rows (each row is a list of strings)."""
     req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
     with urllib.request.urlopen(req, timeout=30) as resp:
-        raw = resp.read().decode('utf-8-sig')  # strip BOM if present
+        raw = resp.read().decode('utf-8-sig')
     reader = csv.reader(io.StringIO(raw))
     return list(reader)
 
 
 def _safe_float(val):
-    """Parse a spreadsheet cell to float; returns None for blanks/errors."""
     if val is None:
         return None
     s = str(val).strip().replace('%', '').replace(',', '.').replace('\\', '')
-    if not s or s in ('-', '—', '#N/A', '#REF!', '#VALUE!', '#DIV/0!', 'N/A'):
+    if not s or s in ('-', '—', '#N/A', '#REF!', '#VALUE!', '#DIV/0!', 'N/A', '#DIV/0'):
         return None
     try:
         return round(float(s), 2)
@@ -90,23 +105,33 @@ def _cell(row, idx):
     return row[idx] if len(row) > idx else ''
 
 
+def _is_date(s):
+    """True if the string looks like a YYYY-MM-DD date."""
+    s = s.strip()
+    return len(s) >= 8 and s[0].isdigit() and '-' in s
+
+
+# ── Main loader ───────────────────────────────────────────────────────────────
 def load_pricing_data():
     """
-    Returns dict keyed by city (matching keys in PRICING_SHEETS):
+    Returns:
     {
       'Malaga': {
         'default_region': 'Málaga',
         'regions': ['Málaga', 'Marbella', 'Airport', 'Mijas'],
-        'col_headers': {'i': 'Col I label', 'j': 'Col J label',
-                        'm': 'Col M label', 'n': 'Col N label'},
-        'rows': [
-          {'region': 'Málaga', 'i': 12.5, 'j': 18.2, 'm': -3.1, 'n': 5.0},
+        'data': {
+          'Málaga': [
+            {'date': '2025-11-10', 'week': "W46'25",
+             'uber_wd': -12.3, 'uber_we': 10.1,
+             'cab_wd':  -5.2,  'cab_we':   3.1},
+            ...
+          ],
+          'Marbella': [...],
           ...
-        ]
+        }
       },
       ...
     }
-    Returns {} on complete failure.
     """
     result = {}
 
@@ -116,61 +141,67 @@ def load_pricing_data():
             url = _csv_url(cfg['file_id'], PERF_SHEET_GID)
             all_rows = _fetch_csv(url)
 
-            if not all_rows:
-                print('empty sheet')
-                continue
+            regions = cfg['regions']
+            data_by_region = {}
 
-            # Row 0 is the header row
-            header = all_rows[0]
-            col_headers = {
-                'i': _cell(header, COL_I) or 'Gap weekday (comp. 1)',
-                'j': _cell(header, COL_J) or 'Gap weekend (comp. 1)',
-                'm': _cell(header, COL_M) or 'Gap weekday (comp. 2)',
-                'n': _cell(header, COL_N) or 'Gap weekend (comp. 2)',
-            }
+            for r_idx, region in enumerate(regions):
+                block_start  = FIRST_BLOCK_COL + r_idx * BLOCK_SIZE
+                col_uber_wd  = block_start + REL_UBER_WD
+                col_uber_we  = block_start + REL_UBER_WE
+                col_cab_wd   = block_start + REL_CAB_WD
+                col_cab_we   = block_start + REL_CAB_WE
 
-            parsed = []
-            for row in all_rows[1:]:
-                region = _cell(row, 0).strip()
-                if not region or region.startswith('#') or region == 'NO_HEADER':
-                    continue
+                region_rows = []
+                for row in all_rows[DATA_START_ROW:]:
+                    date_val = _cell(row, 0).strip()
+                    week_val = _cell(row, 1).strip()
 
-                vi = _safe_float(_cell(row, COL_I))
-                vj = _safe_float(_cell(row, COL_J))
-                vm = _safe_float(_cell(row, COL_M))
-                vn = _safe_float(_cell(row, COL_N))
+                    if not _is_date(date_val):
+                        continue
 
-                # Skip rows where all four values are missing
-                if all(v is None for v in [vi, vj, vm, vn]):
-                    continue
+                    uber_wd = _safe_float(_cell(row, col_uber_wd))
+                    uber_we = _safe_float(_cell(row, col_uber_we))
+                    cab_wd  = _safe_float(_cell(row, col_cab_wd))
+                    cab_we  = _safe_float(_cell(row, col_cab_we))
 
-                parsed.append({'region': region, 'i': vi, 'j': vj, 'm': vm, 'n': vn})
+                    if all(v is None for v in [uber_wd, uber_we, cab_wd, cab_we]):
+                        continue
+
+                    region_rows.append({
+                        'date':    date_val,
+                        'week':    week_val,
+                        'uber_wd': uber_wd,
+                        'uber_we': uber_we,
+                        'cab_wd':  cab_wd,
+                        'cab_we':  cab_we,
+                    })
+
+                data_by_region[region] = region_rows
+
+            total = sum(len(v) for v in data_by_region.values())
+            print(f'{total} data points across {len(regions)} region(s) ✓')
 
             result[city] = {
                 'default_region': cfg['default_region'],
-                'regions': cfg['regions'],
-                'col_headers': col_headers,
-                'rows': parsed,
+                'regions':        regions,
+                'data':           data_by_region,
             }
-            print(f'{len(parsed)} region(s) ✓')
 
         except urllib.error.HTTPError as e:
             print(f'HTTP {e.code} — sheet may not be public')
             result[city] = {
                 'default_region': cfg['default_region'],
-                'regions': cfg['regions'],
-                'col_headers': {},
-                'rows': [],
-                'error': f'HTTP {e.code}',
+                'regions':        cfg['regions'],
+                'data':           {},
+                'error':          f'HTTP {e.code}',
             }
         except Exception as e:
             print(f'error — {e}')
             result[city] = {
                 'default_region': cfg['default_region'],
-                'regions': cfg['regions'],
-                'col_headers': {},
-                'rows': [],
-                'error': str(e),
+                'regions':        cfg['regions'],
+                'data':           {},
+                'error':          str(e),
             }
 
     return result
