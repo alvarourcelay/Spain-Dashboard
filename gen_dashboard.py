@@ -227,9 +227,12 @@ tbody td:first-child{font-weight:600;color:var(--d)}
 .hist-tbl tbody tr:nth-child(odd){background:#FAFAFA}
 .hist-tbl tbody tr:hover{background:#F0FAF4}
 .hist-tbl tbody td{padding:7px 10px;border-bottom:1px solid var(--border);vertical-align:middle;text-align:right}
-.hist-tbl tbody td.hist-period{text-align:left;font-weight:600;color:var(--d);border-right:2px solid #e0e0e0;font-size:12px;min-width:90px;position:sticky;left:0;background:inherit;z-index:1}
-.hist-tbl tbody tr:nth-child(odd) td.hist-period{background:#FAFAFA}
-.hist-tbl tbody tr:hover td.hist-period{background:#F0FAF4}
+.hist-tbl tbody td.hist-day{text-align:center;font-weight:500;color:#888;font-size:11px;width:36px;min-width:36px;position:sticky;left:0;background:inherit;z-index:1;border-right:none;padding:7px 6px}
+.hist-tbl tbody td.hist-period{text-align:left;font-weight:600;color:var(--d);border-right:2px solid #e0e0e0;font-size:12px;min-width:90px;position:sticky;left:36px;background:inherit;z-index:1}
+.hist-tbl tbody tr:nth-child(odd) td.hist-day,.hist-tbl tbody tr:nth-child(odd) td.hist-period{background:#FAFAFA}
+.hist-tbl tbody tr:hover td.hist-day,.hist-tbl tbody tr:hover td.hist-period{background:#F0FAF4}
+.hist-tbl tbody tr.hist-prev-hl{background:#E8F5E9!important}
+.hist-tbl tbody tr.hist-prev-hl td.hist-day,.hist-tbl tbody tr.hist-prev-hl td.hist-period{background:#E8F5E9!important}
 .hist-tbl tbody td.hist-val{font-size:12px;color:var(--d);font-weight:500;padding-right:4px;border-right:none}
 .hist-tbl tbody td.hist-chg{font-size:11px;font-weight:600;padding-left:3px;border-right:2px solid #c8d8cc}
 .hist-tbl .chg-pos{color:#2A9C64}.hist-tbl .chg-neg{color:#c0392b}.hist-tbl .chg-nil{color:#aaa}
@@ -1108,7 +1111,7 @@ function renderHistoricalTable(){
   const totMap=new Map(periods.map(pk=>[pk,buildMerged(byP.get(pk))]));
 
   // Thead: row1 = section spans, row2 = metric names (val|Δ% each)
-  let th1='<tr><th class="period-hdr" rowspan="2">Period</th>';
+  let th1='<tr><th class="period-hdr" rowspan="2" style="min-width:36px;width:36px;left:0;position:sticky">Day</th><th class="period-hdr" rowspan="2" style="left:36px;position:sticky">Period</th>';
   let th2='<tr>';
   for(const sec of HIST_COLS){
     th1+=`<th colspan="${sec.metrics.length*2}" class="metric-hdr ${sec.cls}">${sec.label}</th>`;
@@ -1133,7 +1136,8 @@ function renderHistoricalTable(){
     }else{
       prev=i>0?totMap.get(periods[i-1]):null;
     }
-    let row=`<td class="hist-period">${periodLabel(pk,S.gran)}</td>`;
+    const dayStr=S.gran==='daily'?['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][new Date(pk+'T00:00:00').getDay()]:'';
+    let row=`<td class="hist-day">${dayStr}</td><td class="hist-period">${periodLabel(pk,S.gran)}</td>`;
     for(const sec of HIST_COLS){
       for(const m of sec.metrics){
         const val=accVal(cur,m.k);
@@ -1149,12 +1153,36 @@ function renderHistoricalTable(){
         row+=`<td class="hist-val">${fMetricAp(m.k,val)}${rkt}</td><td class="hist-chg ${chgCls}">${chgStr}</td>`;
       }
     }
-    tbody+=`<tr>${row}</tr>`;
+    tbody+=`<tr data-pk="${pk}">${row}</tr>`;
   }
   tbody+='</tbody>';
   document.getElementById('hist-tbl').innerHTML=thead+tbody;
   document.getElementById('hist-note').textContent=
     `${periods.length} periods · aggregated across ${S.cities.length} cit${S.cities.length===1?'y':'ies'} · ${S.df} → ${S.dt}`;
+
+  // Scroll to bottom so the most recent rows are visible by default
+  const histScroll=document.querySelector('.hist-scroll');
+  if(histScroll) requestAnimationFrame(()=>{histScroll.scrollTop=histScroll.scrollHeight;});
+
+  // Hover: also highlight the same weekday from the previous week (daily mode only)
+  if(S.gran==='daily'){
+    const tbody_el=document.querySelector('#hist-tbl tbody');
+    if(tbody_el){
+      tbody_el.addEventListener('mouseover',e=>{
+        const row=e.target.closest('tr');
+        if(!row||!row.dataset.pk) return;
+        const d=new Date(row.dataset.pk+'T00:00:00');
+        d.setDate(d.getDate()-7);
+        const prevPk=fmtDate(d);
+        tbody_el.querySelectorAll('tr.hist-prev-hl').forEach(r=>r.classList.remove('hist-prev-hl'));
+        const prevRow=tbody_el.querySelector(`tr[data-pk="${prevPk}"]`);
+        if(prevRow) prevRow.classList.add('hist-prev-hl');
+      });
+      tbody_el.addEventListener('mouseleave',()=>{
+        tbody_el.querySelectorAll('tr.hist-prev-hl').forEach(r=>r.classList.remove('hist-prev-hl'));
+      });
+    }
+  }
 }
 
 // ── EVENT HANDLERS ────────────────────────────────────────────────────
