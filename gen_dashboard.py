@@ -5,6 +5,7 @@ Data source: Databricks (DATA_SOURCE=databricks) or CSV (default).
 
 import csv, json, os
 from datetime import datetime, timedelta
+from pricing_loader import load_pricing_data
 
 LAUNCH_DATES = {
     'A Coruña':  '2025-09-24', 'Alicante':  '2026-02-27',
@@ -81,6 +82,11 @@ else:
             })
 
 data.sort(key=lambda x:(x['d'],x['c']))
+
+# ── Load pricing data from Google Sheets ─────────────────────────────────────
+print('Loading pricing data from Google Sheets…')
+pricing_data    = load_pricing_data()
+pricing_json    = json.dumps(pricing_data, separators=(',',':'))
 all_cities   = sorted(set(d['c'] for d in data))
 min_date     = min(d['d'] for d in data)
 max_date     = max(d['d'] for d in data)
@@ -231,6 +237,23 @@ tbody td:first-child{font-weight:600;color:var(--d)}
 @media(max-width:1200px){.sec-grid-6{grid-template-columns:repeat(3,1fr)}.sec-grid-5{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:1000px){.kpi-row{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:560px){.kpi-row{grid-template-columns:1fr}.sec-grid-6,.sec-grid-5,.sec-grid-3{grid-template-columns:repeat(2,1fr)}}
+
+/* PRICING SECTION */
+.pricing-controls{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin-bottom:20px}
+.pricing-select{border:1.5px solid var(--border);border-radius:7px;padding:6px 28px 6px 10px;font-family:inherit;font-size:13px;font-weight:500;background:var(--w);cursor:pointer;min-width:140px;color:var(--b)}
+.pricing-select:focus{outline:none;border-color:var(--g)}
+.pricing-flabel{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--d);margin-bottom:5px}
+.pgap-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
+@media(max-width:700px){.pgap-grid{grid-template-columns:1fr}}
+.pgap-card{background:var(--cbg);border:1px solid var(--border);border-radius:10px;padding:16px 18px}
+.pgap-card-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--d);margin-bottom:14px}
+.pgap-chart-wrap{position:relative;height:220px}
+.pricing-empty{padding:40px;text-align:center;color:#999;font-style:italic}
+.pgap-legend{display:flex;gap:14px;margin-top:10px;flex-wrap:wrap;font-size:11px;color:var(--muted);align-items:center}
+.pgap-legend-item{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--t2)}
+.pgap-legend-dot{width:10px;height:10px;border-radius:2px}
+.pgap-dot{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:middle}
+.pgap-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:12px}
 </style>
 </head>
 <body>
@@ -351,6 +374,27 @@ tbody td:first-child{font-weight:600;color:var(--d)}
     <div class="hist-scroll"><table class="hist-tbl" id="hist-tbl"></table></div>
   </div>
 
+  <!-- PRICING COMPETITIVENESS -->
+  <div class="chart-card" id="pricing-section">
+    <div class="card-header">
+      <div>
+        <div class="card-title">⚡ Pricing Gap vs Competitors — Performance by Region</div>
+        <div class="chart-note">Positive = Bolt more expensive · Negative = Bolt cheaper · Surge included</div>
+      </div>
+    </div>
+    <div class="pricing-controls">
+      <div>
+        <div class="pricing-flabel">City</div>
+        <select class="pricing-select" id="p-city" onchange="onPCity()"></select>
+      </div>
+      <div>
+        <div class="pricing-flabel">Region</div>
+        <select class="pricing-select" id="p-region" onchange="renderPricing()"></select>
+      </div>
+    </div>
+    <div id="pricing-body"></div>
+  </div>
+
 </div>
 <script>
 // ── DATA ──────────────────────────────────────────────────────────────
@@ -359,6 +403,7 @@ const ALL_CITIES  = __CITIES__;
 const CITY_COLORS = __COLORS__;
 const EXPANSION   = __EXPANSION__;
 const ROS         = __ROS__;
+const PRICING_DATA = __PRICING_DATA__;
 const DATA_MIN    = '__MIN_DATE__';
 const DATA_MAX    = '__MAX_DATE__';
 
@@ -1122,6 +1167,110 @@ function toggleMetric(btn){
 }
 function onDate(){S.df=document.getElementById('df').value;S.dt=document.getElementById('dt').value;renderAll();}
 
+// ── PRICING SECTION ───────────────────────────────────────────────────
+const _pCharts = {};
+function onPCity(){
+  const city = document.getElementById('p-city').value;
+  const sel  = document.getElementById('p-region');
+  sel.innerHTML = '';
+  const cfg = PRICING_DATA[city];
+  if(!cfg){renderPricing();return;}
+  cfg.regions.forEach(r=>{
+    const o=document.createElement('option');
+    o.value=r; o.textContent=r;
+    if(r===cfg.default_region) o.selected=true;
+    sel.appendChild(o);
+  });
+  renderPricing();
+}
+function initPricingCity(){
+  const cs = document.getElementById('p-city');
+  cs.innerHTML='';
+  const cities = Object.keys(PRICING_DATA);
+  if(!cities.length){
+    document.getElementById('pricing-section').style.display='none';
+    return;
+  }
+  cities.forEach(c=>{const o=document.createElement('option');o.value=c;o.textContent=c;cs.appendChild(o);});
+  onPCity();
+}
+function renderPricing(){
+  const city   = document.getElementById('p-city').value;
+  const region = document.getElementById('p-region').value;
+  const body   = document.getElementById('pricing-body');
+  const cfg    = PRICING_DATA[city];
+  if(!cfg||!cfg.rows||!cfg.rows.length){
+    body.innerHTML='<div style="color:var(--muted);padding:24px 0;text-align:center">No pricing data available for this city.</div>';
+    return;
+  }
+  // Find rows for this region (or all rows if only one region)
+  const rows = cfg.rows.filter(r=>r.region===region);
+  if(!rows.length){
+    body.innerHTML='<div style="color:var(--muted);padding:24px 0;text-align:center">No data for selected region.</div>';
+    return;
+  }
+  const h   = cfg.col_headers||{};
+  const lbl1wd = h.i||'Comp 1 · Weekday';
+  const lbl1we = h.j||'Comp 1 · Weekend';
+  const lbl2wd = h.m||'Comp 2 · Weekday';
+  const lbl2we = h.n||'Comp 2 · Weekend';
+
+  // Destroy old charts
+  ['pc1','pc2'].forEach(id=>{if(_pCharts[id]){_pCharts[id].destroy();delete _pCharts[id];}});
+
+  // Build region labels and value arrays
+  const labels = rows.map(r=>r.region);
+  const v1wd   = rows.map(r=>r.i);
+  const v1we   = rows.map(r=>r.j);
+  const v2wd   = rows.map(r=>r.m);
+  const v2we   = rows.map(r=>r.n);
+
+  function barColor(vals){return vals.map(v=>v==null?'rgba(0,0,0,0)':v>0?'rgba(239,68,68,0.75)':'rgba(34,197,94,0.75)');}
+  function fmt(v){return v==null?'N/A':(v>0?'+':'')+v.toFixed(1)+'%';}
+
+  body.innerHTML=`
+    <div class="pgap-grid">
+      <div class="pgap-card">
+        <div class="pgap-title">${lbl1wd} vs ${lbl1we}</div>
+        <div class="pgap-chart-wrap"><canvas id="pc1"></canvas></div>
+        <div class="pgap-legend"><span class="pgap-dot" style="background:rgba(239,68,68,0.75)"></span>Bolt more expensive&nbsp;&nbsp;<span class="pgap-dot" style="background:rgba(34,197,94,0.75)"></span>Bolt cheaper</div>
+      </div>
+      <div class="pgap-card">
+        <div class="pgap-title">${lbl2wd} vs ${lbl2we}</div>
+        <div class="pgap-chart-wrap"><canvas id="pc2"></canvas></div>
+        <div class="pgap-legend"><span class="pgap-dot" style="background:rgba(239,68,68,0.75)"></span>Bolt more expensive&nbsp;&nbsp;<span class="pgap-dot" style="background:rgba(34,197,94,0.75)"></span>Bolt cheaper</div>
+      </div>
+    </div>`;
+
+  function makeChart(id, ds1vals, ds1label, ds2vals, ds2label){
+    const ctx=document.getElementById(id).getContext('2d');
+    _pCharts[id]=new Chart(ctx,{
+      type:'bar',
+      data:{
+        labels,
+        datasets:[
+          {label:ds1label, data:ds1vals, backgroundColor:barColor(ds1vals), borderRadius:4},
+          {label:ds2label, data:ds2vals, backgroundColor:barColor(ds2vals).map(c=>c.replace('0.75','0.45')), borderRadius:4, borderDash:[4,4]},
+        ]
+      },
+      options:{
+        indexAxis:'y',
+        responsive:true, maintainAspectRatio:false,
+        plugins:{
+          legend:{labels:{color:'var(--text)',font:{size:11}}},
+          tooltip:{callbacks:{label:ctx=>ctx.dataset.label+': '+fmt(ctx.raw)}}
+        },
+        scales:{
+          x:{grid:{color:'rgba(150,150,150,0.15)'},ticks:{color:'var(--muted)',callback:v=>(v>0?'+':'')+v+'%'},title:{display:true,text:'Gap % (+ = Bolt more expensive)',color:'var(--muted)',font:{size:10}}},
+          y:{grid:{display:false},ticks:{color:'var(--text)',font:{size:11}}}
+        }
+      }
+    });
+  }
+  makeChart('pc1', v1wd, lbl1wd, v1we, lbl1we);
+  makeChart('pc2', v2wd, lbl2wd, v2we, lbl2we);
+}
+
 // ── INIT ──────────────────────────────────────────────────────────────
 function renderAll(){
   computeGlobalCityATH();
@@ -1132,6 +1281,7 @@ function renderAll(){
 }
 document.getElementById('nav-badge').textContent='Data up to '+new Date(DATA_MAX+'T00:00:00').toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
 renderAll();
+initPricingCity();
 </script>
 </body>
 </html>"""
@@ -1142,6 +1292,7 @@ html = (TMPL
     .replace('__COLORS__',       colors_json)
     .replace('__EXPANSION__',    expansion_json)
     .replace('__ROS__',          ros_json)
+    .replace('__PRICING_DATA__', pricing_json)
     .replace('__MIN_DATE__',     min_date)
     .replace('__MAX_DATE__',     max_date)
     .replace('__DEFAULT_FROM__', default_from)
