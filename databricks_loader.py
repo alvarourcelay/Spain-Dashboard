@@ -165,8 +165,8 @@ def load_data():
         # Further derived from ap/ar
         hpad = (o / ap)   if ap else None
         rpr  = (f / ar)   if ar else None
-        # EPH (supply spend per online hour — best approximation available)
-        eph  = (sspend_eur / o) if o and sspend_eur is not None else None
+        # EPH = GMV / Online Hours
+        eph  = (g / o) if o else None
 
         # Skip rows with no meaningful data
         if f == 0 and g == 0:
