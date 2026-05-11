@@ -598,6 +598,34 @@ function prevBeforeLast(gran){
   const y=d.getFullYear(),m=d.getMonth(),ms=String(m+1).padStart(2,'0');
   return{from:`${y}-${ms}-01`,to:pt};
 }
+// Last complete period ending on or before toDate (respects user-selected date range)
+function lastPeriodInRange(gran,toDate){
+  const d=new Date(toDate+'T00:00:00');
+  if(gran==='daily')return{from:toDate,to:toDate,label:toDate};
+  if(gran==='weekly'){
+    const dow=(d.getDay()+6)%7; // 0=Mon … 6=Sun
+    const weekEnd=new Date(d);
+    weekEnd.setDate(d.getDate()-(dow===6?0:dow+1)); // Sun on or before toDate
+    if(fmtDate(weekEnd)<DATA_MIN)return null;
+    const weekStart=new Date(weekEnd);weekStart.setDate(weekEnd.getDate()-6);
+    const f=fmtDate(weekStart),t=fmtDate(weekEnd);
+    return{from:f,to:t,label:isoWeek(f)};
+  }
+  const y=d.getFullYear(),m=d.getMonth(),ld=new Date(y,m+1,0).getDate();
+  let py,pm;
+  if(d.getDate()===ld){py=y;pm=m;}else{pm=m-1;py=pm<0?y-1:y;pm=pm<0?11:pm;}
+  const pld=new Date(py,pm+1,0).getDate(),ms=String(pm+1).padStart(2,'0');
+  return{from:`${py}-${ms}-01`,to:`${py}-${ms}-${pld}`,label:`${py}-${ms}`};
+}
+function prevBeforeRange(gran,toDate){
+  const last=lastPeriodInRange(gran,toDate);if(!last)return null;
+  const d=new Date(last.from+'T00:00:00');d.setDate(d.getDate()-1);
+  const pt=fmtDate(d);
+  if(gran==='daily')return{from:pt,to:pt};
+  if(gran==='weekly'){const m=new Date(d);m.setDate(d.getDate()-6);return{from:fmtDate(m),to:pt};}
+  const y=d.getFullYear(),m=d.getMonth(),ms=String(m+1).padStart(2,'0');
+  return{from:`${y}-${ms}-01`,to:pt};
+}
 
 // ── AGGREGATION ───────────────────────────────────────────────────────
 function filteredRows(fromD,toD){
@@ -754,7 +782,11 @@ function toggleCity(c){const i=S.cities.indexOf(c);if(i>=0)S.cities.splice(i,1);
 function setGroup(g){S.cities=g==='all'?[...ALL_CITIES]:g==='exp'?[...EXPANSION]:g==='ros'?[...ROS]:[];renderAll();}
 
 // ── KPI DATE RANGES ───────────────────────────────────────────────────
-function kpiDateRange(){if(S.kpiMode==='range')return{from:S.df,to:S.dt};const lcp=lastCompletePeriod(S.gran);return lcp?{from:lcp.from,to:lcp.to}:{from:S.df,to:S.dt};}
+function kpiDateRange(){
+  if(S.kpiMode==='range')return{from:S.df,to:S.dt};
+  const lcp=lastPeriodInRange(S.gran,S.dt);
+  return lcp?{from:lcp.from,to:lcp.to}:{from:S.df,to:S.dt};
+}
 function kpiPrevRange(){
   if(S.kpiMode==='range'){
     const a=new Date(S.df+'T00:00:00'),b=new Date(S.dt+'T00:00:00');
@@ -763,11 +795,11 @@ function kpiPrevRange(){
     const ps=new Date(pe);ps.setDate(pe.getDate()-days+1);
     return{from:fmtDate(ps),to:fmtDate(pe)};
   }
-  return prevBeforeLast(S.gran)||{from:S.df,to:S.dt};
+  return prevBeforeRange(S.gran,S.dt)||{from:S.df,to:S.dt};
 }
 function kpiPeriodLabel(){
   if(S.kpiMode==='range')return S.df+' → '+S.dt;
-  const lcp=lastCompletePeriod(S.gran);if(!lcp)return'';
+  const lcp=lastPeriodInRange(S.gran,S.dt);if(!lcp)return'';
   if(S.gran==='daily')return'Latest day: '+lcp.label;
   if(S.gran==='weekly')return'Latest week: '+periodLabel(lcp.label,'weekly');
   return'Latest month: '+periodLabel(lcp.label,'monthly');
@@ -860,6 +892,7 @@ function renderSecChart(secId){
   const multiM=sel.length>1;
   const normalize=lineKs.length>1;
   const datasets=[];
+  const secNormAvgs={};  // store per-metric avg for LY normalization
 
   if(multiM){
     // Aggregate across cities, one dataset per metric; colorIdx shared across line+bar
@@ -870,7 +903,7 @@ function renderSecChart(secId){
       let data=periods.map(p=>pmap[p]??null);
       const athFlags=data.map(v=>isATH(k,v));
       const rawData=data.slice();
-      if(normalize){const vals=data.filter(v=>v!=null);const avg=vals.reduce((s,v)=>s+v,0)/(vals.length||1);data=data.map(v=>v!=null?(v/avg)*100:null);}
+      if(normalize){const vals=data.filter(v=>v!=null);const avg=vals.reduce((s,v)=>s+v,0)/(vals.length||1);secNormAvgs[k]=avg;data=data.map(v=>v!=null?(v/avg)*100:null);}
       const col=SEC_COLORS[colorIdx%SEC_COLORS.length];
       const dash=SEC_DASHES[colorIdx%SEC_DASHES.length];
       colorIdx++;
@@ -911,7 +944,8 @@ function renderSecChart(secId){
     const yr=yoyRange();
     const byP_ly=aggregate(filteredRows(yr.from,yr.to));
     for(const k of lineKs){
-      const lyData=periods.map(pk=>{return lyAggAtPeriod(byP_ly,lyPeriodKey(pk),k);});
+      let lyData=periods.map(pk=>lyAggAtPeriod(byP_ly,lyPeriodKey(pk),k));
+      if(normalize&&secNormAvgs[k]){const avg=secNormAvgs[k];lyData=lyData.map(v=>v!=null?(v/avg)*100:null);}
       const existingDs=datasets.find(d=>d._mk===k&&d.type==='line');
       const baseCol=(existingDs?.borderColor||'#888').replace(/[0-9a-f]{2}$/i,'');
       datasets.push({label:mLabel(k)+' (LY)',data:lyData,type:'line',yAxisID:'yLeft',
