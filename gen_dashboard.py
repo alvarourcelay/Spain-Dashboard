@@ -974,13 +974,14 @@ function renderChart(){
   const lineMs=S.metrics.filter(m=>m!=='n'),hasNR=S.metrics.includes('n');
   const multiM=S.metrics.length>1,normalize=lineMs.length>1;
   const datasets=[];
+  const normAvgs={};  // store per-metric avg for LY normalization
   if(multiM){
     for(const m of lineMs){
       const agg=aggSum(byP,m);const pmap=Object.fromEntries(agg.map(d=>[d.pk,d.val]));
       let data=periods.map(p=>pmap[p]??null);
       const athFlags=data.map(v=>isATH(m,v));
       const rawData=data.slice();
-      if(normalize){const vals=data.filter(v=>v!=null);const avg=vals.reduce((s,v)=>s+v,0)/(vals.length||1);data=data.map(v=>v!=null?(v/avg)*100:null);}
+      if(normalize){const vals=data.filter(v=>v!=null);const avg=vals.reduce((s,v)=>s+v,0)/(vals.length||1);normAvgs[m]=avg;data=data.map(v=>v!=null?(v/avg)*100:null);}
       datasets.push({label:mLabel(m),data,type:'line',yAxisID:'yLeft',
         borderColor:METRIC_COLORS[m]||SEC_COLORS[lineMs.indexOf(m)%SEC_COLORS.length],
         backgroundColor:(METRIC_COLORS[m]||SEC_COLORS[lineMs.indexOf(m)%SEC_COLORS.length])+'22',
@@ -1010,7 +1011,12 @@ function renderChart(){
     const byP_ly=aggregate(filteredRows(yr.from,yr.to));
     const metricsToOverlay=multiM?lineMs:(S.metrics[0]==='n'?[]:S.metrics);
     for(const m of metricsToOverlay){
-      const lyData=periods.map(pk=>{return lyAggAtPeriod(byP_ly,lyPeriodKey(pk),m);});
+      let lyData=periods.map(pk=>lyAggAtPeriod(byP_ly,lyPeriodKey(pk),m));
+      // Apply same normalization as CY so both series share the same index scale
+      if(normalize&&normAvgs[m]){
+        const avg=normAvgs[m];
+        lyData=lyData.map(v=>v!=null?(v/avg)*100:null);
+      }
       const baseCol=METRIC_COLORS[m]||'#888';
       datasets.push({label:mLabel(m)+' (LY)',data:lyData,type:'line',yAxisID:'yLeft',
         borderColor:baseCol+'88',backgroundColor:'transparent',borderDash:[6,4],
