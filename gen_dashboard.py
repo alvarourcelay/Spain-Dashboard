@@ -150,7 +150,7 @@ nav{background:var(--d);padding:0 28px;height:56px;display:flex;align-items:cent
 
 /* KPI CARDS */
 .kpi-section{display:flex;flex-direction:column;gap:10px}
-.kpi-mode-row{display:flex;align-items:center;gap:12px}
+.kpi-mode-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .kpi-mode-label{font-size:11px;font-weight:600;color:var(--t2);text-transform:uppercase;letter-spacing:.5px}
 .kpi-row{display:grid;grid-template-columns:repeat(5,1fr);gap:14px}
 .kpi-card{background:var(--w);border:1px solid var(--border);border-radius:12px;padding:20px 22px;border-top:3px solid var(--g)}
@@ -294,10 +294,18 @@ tbody td:first-child{font-weight:600;color:var(--d)}
   <!-- MARKETPLACE KPI CARDS + CHART -->
   <div class="kpi-section">
     <div class="kpi-mode-row">
-      <span class="kpi-mode-label">KPI cards show</span>
-      <div class="seg">
-        <button class="seg-btn active" data-km="range" onclick="setKpiMode(this)">Full range</button>
-        <button class="seg-btn"        data-km="prev"  onclick="setKpiMode(this)">Previous period</button>
+      <div id="kpi-mode-grp" style="display:flex;align-items:center;gap:12px">
+        <span class="kpi-mode-label">KPI cards show</span>
+        <div class="seg">
+          <button class="seg-btn active" data-km="range" onclick="setKpiMode(this)">Full range</button>
+          <button class="seg-btn"        data-km="prev"  onclick="setKpiMode(this)">Previous period</button>
+        </div>
+      </div>
+      <div style="margin-left:auto;display:flex;align-items:center;gap:10px">
+        <span class="kpi-mode-label">Additional views</span>
+        <div class="seg">
+          <button class="seg-btn" id="yoy-btn" onclick="toggleYoY()">Year over Year</button>
+        </div>
       </div>
     </div>
     <div class="kpi-row" id="kpi-row"></div>
@@ -767,16 +775,18 @@ function kpiPeriodLabel(){
 
 // ── KPI CARDS ─────────────────────────────────────────────────────────
 function renderKPIs(){
-  const rng=kpiDateRange(),prng=kpiPrevRange();
+  const rng=kpiDateRange();
+  const prng=yoyMode?yoyRange():kpiPrevRange();
   const cur=totals(aggregate(filteredRows(rng.from,rng.to)));
   const prv=totals(aggregate(filteredRows(prng.from,prng.to)));
   const pStr=kpiPeriodLabel();
+  const vsLbl=yoyMode?'vs LY':'vs prev.';
   document.getElementById('kpi-row').innerHTML=
     [{k:'f',label:'Finished Orders'},{k:'g',label:'GMV'},{k:'n',label:'Net Rate (wtd. avg.)'},{k:'o',label:'Online Hours'},{k:'sess',label:'Sessions'}]
     .map(({k,label})=>{
       const val=cur[k];
       const ch=chgVal(k,val,prv[k]);
-      const sub=ch!=null?`<div class="kpi-sub ${ch>=0?'kpi-up':'kpi-dn'}">${ch>=0?'↑':'↓'} ${chgStr(k,ch)} vs prev.</div>`:'';
+      const sub=ch!=null?`<div class="kpi-sub ${ch>=0?'kpi-up':'kpi-dn'}">${ch>=0?'↑':'↓'} ${chgStr(k,ch)} ${vsLbl}</div>`:'';
       const rocket=isATH(k,val)?` ${ROCKET}`:'';
       return`<div class="kpi-card"><div class="kpi-label">${label}</div><div class="kpi-val">${fMetric(k,val)}${rocket}</div><div class="kpi-period">${pStr}</div>${sub}</div>`;
     }).join('');
@@ -784,7 +794,7 @@ function renderKPIs(){
 
 // ── SECONDARY CARDS ───────────────────────────────────────────────────
 function renderSecondary(){
-  const rng=kpiDateRange(),prng=kpiPrevRange();
+  const rng=kpiDateRange(),prng=yoyMode?yoyRange():kpiPrevRange();
   const cur=secTotals(aggregate(filteredRows(rng.from,rng.to)));
   const prv=secTotals(aggregate(filteredRows(prng.from,prng.to)));
   function card(label,k,val,pval,fmt){
@@ -896,6 +906,19 @@ function renderSecChart(secId){
     });
   }
 
+  // YoY overlay — dashed aggregate line per active line metric
+  if(yoyMode){
+    const yr=yoyRange();
+    const byP_ly=aggregate(filteredRows(yr.from,yr.to));
+    for(const k of lineKs){
+      const lyData=periods.map(pk=>{return lyAggAtPeriod(byP_ly,lyPeriodKey(pk),k);});
+      const existingDs=datasets.find(d=>d._mk===k&&d.type==='line');
+      const baseCol=(existingDs?.borderColor||'#888').replace(/[0-9a-f]{2}$/i,'');
+      datasets.push({label:mLabel(k)+' (LY)',data:lyData,type:'line',yAxisID:'yLeft',
+        borderColor:(existingDs?.borderColor||'#888')+'88',backgroundColor:'transparent',
+        borderDash:[6,4],borderWidth:1.5,pointRadius:0,tension:.3,spanGaps:false,_mk:k});
+    }
+  }
   const showLeft=lineKs.length>0||(sel.length===1&&!cfg.metrics.find(m=>m.k===sel[0])?.bar);
   const showRight=barKs.length>0||(sel.length===1&&cfg.metrics.find(m=>m.k===sel[0])?.bar);
   const leftLabel=normalize?'Index (avg = 100)':'';
@@ -981,10 +1004,23 @@ function renderChart(){
         pointRadius:periods.length>90?0:3,pointHoverRadius:5,tension:.3,spanGaps:false,_athFlags:athFlags,_mk:m});}
     });
   }
+  // YoY overlay — dashed aggregate line per active line metric
+  if(yoyMode){
+    const yr=yoyRange();
+    const byP_ly=aggregate(filteredRows(yr.from,yr.to));
+    const metricsToOverlay=multiM?lineMs:(S.metrics[0]==='n'?[]:S.metrics);
+    for(const m of metricsToOverlay){
+      const lyData=periods.map(pk=>{return lyAggAtPeriod(byP_ly,lyPeriodKey(pk),m);});
+      const baseCol=METRIC_COLORS[m]||'#888';
+      datasets.push({label:mLabel(m)+' (LY)',data:lyData,type:'line',yAxisID:'yLeft',
+        borderColor:baseCol+'88',backgroundColor:'transparent',borderDash:[6,4],
+        borderWidth:1.5,pointRadius:0,tension:.3,spanGaps:false,_mk:m,_rawData:null});
+    }
+  }
   const showLeft=lineMs.length>0,showRight=hasNR||S.metrics[0]==='n';
   const leftLabel=normalize?'Index (avg = 100)':(lineMs.length===1?mLabel(lineMs[0]):'');
   document.getElementById('chart-note').textContent=
-    multiM&&normalize?'Multiple metrics — normalized (avg = 100). Hover to see real values.':multiM?'Aggregated across selected cities.':'';
+    multiM&&normalize?'Multiple metrics — normalized (avg = 100). Hover to see real values.':multiM?'Aggregated across selected cities.':(yoyMode?'Solid = current year · Dashed = same period last year':'');
   if(mainChart){mainChart.destroy();mainChart=null;}
   mainChart=new Chart(document.getElementById('chart').getContext('2d'),{
     data:{labels,datasets},
@@ -1116,20 +1152,30 @@ function renderHistoricalTable(){
   for(const sec of HIST_COLS){
     th1+=`<th colspan="${sec.metrics.length*2}" class="metric-hdr ${sec.cls}">${sec.label}</th>`;
     for(const m of sec.metrics){
-      th2+=`<th class="metric-hdr" style="font-weight:600">${m.label}</th><th class="metric-hdr" style="color:#888">Δ%</th>`;
+      th2+=`<th class="metric-hdr" style="font-weight:600">${m.label}</th><th class="metric-hdr" style="color:#888">${yoyMode?'YoY':'Δ%'}</th>`;
     }
   }
   th1+='</tr>';th2+='</tr>';
   const thead='<thead>'+th1+th2+'</thead>';
+
+  // Build LY lookup map when yoyMode
+  let totMap_ly=null;
+  if(yoyMode){
+    const yr=yoyRange();
+    const byP_ly=aggregate(filteredRows(yr.from,yr.to));
+    totMap_ly=new Map([...byP_ly.keys()].map(pk=>[pk,buildMerged(byP_ly.get(pk))]));
+  }
 
   // Tbody: oldest → newest
   let tbody='<tbody>';
   for(let i=0;i<periods.length;i++){
     const pk=periods[i];
     const cur=totMap.get(pk);
-    // Previous period: WoW for daily, otherwise the preceding period key
+    // Previous period comparison
     let prev=null;
-    if(S.gran==='daily'){
+    if(yoyMode&&totMap_ly){
+      prev=totMap_ly.get(lyPeriodKey(pk))||null;
+    }else if(S.gran==='daily'){
       const d=new Date(pk+'T00:00:00');d.setDate(d.getDate()-7);
       const wkAgo=fmtDate(d);
       prev=totMap.has(wkAgo)?totMap.get(wkAgo):null;
@@ -1195,6 +1241,32 @@ function toggleMetric(btn){
   renderChart();
 }
 function onDate(){S.df=document.getElementById('df').value;S.dt=document.getElementById('dt').value;renderAll();}
+
+// ── YEAR OVER YEAR ────────────────────────────────────────────────────
+let yoyMode=false;
+function toggleYoY(){
+  yoyMode=!yoyMode;
+  document.getElementById('yoy-btn').classList.toggle('active',yoyMode);
+  const grp=document.getElementById('kpi-mode-grp');
+  grp.style.opacity=yoyMode?'0.4':'1';
+  grp.style.pointerEvents=yoyMode?'none':'';
+  renderAll();
+}
+function yoyRange(){
+  const days=S.gran==='monthly'?365:364;
+  const d1=new Date(S.df+'T00:00:00'),d2=new Date(S.dt+'T00:00:00');
+  d1.setDate(d1.getDate()-days);d2.setDate(d2.getDate()-days);
+  return{from:fmtDate(d1),to:fmtDate(d2)};
+}
+function lyPeriodKey(pk){
+  if(S.gran==='weekly'){const[y,w]=pk.split('-W');return(parseInt(y)-1)+'-W'+w;}
+  if(S.gran==='monthly'){const[y,m]=pk.split('-');return(parseInt(y)-1)+'-'+m;}
+  const d=new Date(pk+'T00:00:00');d.setDate(d.getDate()-364);return fmtDate(d);
+}
+function lyAggAtPeriod(byP_ly,pk,k){
+  const cm=byP_ly.get(pk);if(!cm)return null;
+  return accVal(buildMerged(cm),k);
+}
 
 // ── PRICING SECTION ───────────────────────────────────────────────────
 const _pCharts = {};
@@ -1350,7 +1422,10 @@ function renderAll(){
   renderPills();renderKPIs();renderSecondary();renderChart();
   for(const id of['supply','demand','pricing','general']){renderSecPills(id);renderSecChart(id);}
   renderHistoricalTable();
-  syncPricingCity();
+  // Hide pricing gap section when YoY mode is active
+  const ps=document.getElementById('pricing-section');
+  if(ps) ps.style.display=yoyMode?'none':'';
+  if(!yoyMode) syncPricingCity();
 }
 document.getElementById('nav-badge').textContent='Data up to '+new Date(DATA_MAX+'T00:00:00').toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
 renderAll();
