@@ -6,6 +6,7 @@ Data source: Databricks (DATA_SOURCE=databricks) or CSV (default).
 import csv, json, os
 from datetime import datetime, timedelta
 from pricing_loader import load_pricing_data
+from quality_loader import load_quality_data
 
 LAUNCH_DATES = {
     'A Coruña':  '2025-09-24', 'Alicante':  '2026-02-27',
@@ -87,6 +88,17 @@ data.sort(key=lambda x:(x['d'],x['c']))
 print('Loading pricing data from Google Sheets…')
 pricing_data    = load_pricing_data()
 pricing_json    = json.dumps(pricing_data, separators=(',',':'))
+
+# ── Load quality data from Google Sheets ─────────────────────────────────────
+print('Loading quality data from Google Sheets…')
+quality_raw = load_quality_data()  # {city: {date: {oot_gs, ar_in, ar_out}}}
+
+# Merge quality fields into each data row (left-join on city + date)
+for row in data:
+    q = quality_raw.get(row['c'], {}).get(row['d'], {})
+    row['oot_gs'] = q.get('oot_gs')
+    row['ar_in']  = q.get('ar_in')
+    row['ar_out'] = q.get('ar_out')
 all_cities   = sorted(set(d['c'] for d in data))
 min_date     = min(d['d'] for d in data)
 max_date     = max(d['d'] for d in data)
@@ -222,6 +234,7 @@ tbody td:first-child{font-weight:600;color:var(--d)}
 .hist-tbl thead .sec-hdr-supply{background:#1B5E3A;color:#fff}
 .hist-tbl thead .sec-hdr-demand{background:#1B4A31;color:#fff}
 .hist-tbl thead .sec-hdr-pricing{background:#2A3F32;color:#fff}
+.hist-tbl thead .sec-hdr-quality{background:#0A3D22;color:#fff}
 .hist-tbl thead .metric-hdr{background:#f7f7f7;color:var(--d);font-size:10px;letter-spacing:.3px;border-top:none;border-right:1px solid var(--border)}
 .hist-tbl thead .period-hdr{background:var(--d);color:#fff;text-align:left;border-right:2px solid #2A9C64;min-width:90px}
 .hist-tbl tbody tr:nth-child(odd){background:#FAFAFA}
@@ -386,6 +399,19 @@ tbody td:first-child{font-weight:600;color:var(--d)}
     <div id="pricing-body"></div>
   </div>
 
+  <!-- QUALITY -->
+  <div class="sec-section">
+    <div class="sec-hdr">Quality</div>
+    <div class="sec-grid sec-grid-6" id="quality-cards"></div>
+    <div class="sec-chart">
+      <div class="sec-chart-head">
+        <div><div class="sec-chart-title">Trend</div><div class="sec-chart-note" id="quality-note"></div></div>
+        <div class="metric-checks" id="quality-pills"></div>
+      </div>
+      <div class="sec-chart-body"><canvas id="quality-chart"></canvas></div>
+    </div>
+  </div>
+
   <!-- GENERAL DASHBOARD -->
   <div class="sec-section">
     <div class="sec-hdr">General Dashboard</div>
@@ -457,6 +483,18 @@ const SECTIONS = {
     default:['arp'],
     inst: null,
   },
+  quality: {
+    metrics: [
+      {k:'o2f',    label:'O2F %',              bar:true },
+      {k:'oar',    label:'Order Accept. Rate', bar:true },
+      {k:'par',    label:'Partner Accept.',    bar:true },
+      {k:'oot_gs', label:'% Outside Radius',   bar:true },
+      {k:'ar_in',  label:'AR Inside Radius',   bar:true },
+      {k:'ar_out', label:'AR Outside Radius',  bar:true },
+    ],
+    default:['o2f'],
+    inst: null,
+  },
   general: {
     metrics: [
       // Marketplace
@@ -481,6 +519,10 @@ const SECTIONS = {
       {k:'eutil',    label:'Eff. Utilisation',       bar:true },
       {k:'oar',      label:'Order Accept. Rate',     bar:true },
       {k:'par',      label:'Partner Accept. Rate',   bar:true },
+      // Quality (Google Sheet)
+      {k:'oot_gs',   label:'% Outside SR',            bar:true },
+      {k:'ar_in',    label:'AR Inside SR',             bar:true },
+      {k:'ar_out',   label:'AR Outside SR',            bar:true },
       // Demand
       {k:'ar',       label:'Active Riders',          bar:false},
       {k:'rpr',      label:'Rides / Active Rider',   bar:false},
@@ -506,7 +548,7 @@ const SECTIONS = {
   },
 };
 // Section metric selections (mutable)
-const SEC_SEL = { supply:['eph'], demand:['sess'], pricing:['arp'], general:['f'] };
+const SEC_SEL = { supply:['eph'], demand:['sess'], pricing:['arp'], quality:['o2f'], general:['f'] };
 // Multi-metric color palette — diverse colors for visual differentiation
 const SEC_COLORS=['#2A9C64','#F5B800','#3B82F6','#F97316','#A855F7','#EF4444','#06B6D4','#84CC16','#EC4899','#0EA5E9'];
 // Dash patterns for additional differentiation
@@ -644,7 +686,8 @@ function aggregate(rows){
       sc_s:0,s2f_s:0,s2o_s:0,o2f_s:0,oot_s:0,
       arp_s:0,dist_s:0,ppk_s:0,surge_s:0,ata_s:0,oar_s:0,par_s:0,rpr_s:0,
       dspend_s:0,dspend_w:0,sspend_s:0,sspend_w:0,bspend_s:0,bspend_w:0,
-      dcc_s:0,dcc_w:0,sspend_ex_s:0,sspend_ex_w:0});
+      dcc_s:0,dcc_w:0,sspend_ex_s:0,sspend_ex_w:0,
+      oot_gs_s:0,oot_gs_w:0,ar_in_s:0,ar_in_w:0,ar_out_s:0,ar_out_w:0});
     const a=cm.get(r.c);
     a.f+=r.f;a.g+=r.g;a.o+=r.o;
     if(r.n!=null&&r.g>0){a.ns+=r.n*r.g;a.nw+=r.g;}
@@ -659,7 +702,10 @@ function aggregate(rows){
              if(r.o2f!=null)a.o2f_s+=r.o2f*ss;if(r.oot!=null)a.oot_s+=r.oot*ss;}
     if(fo>0){if(r.arp!=null)a.arp_s+=r.arp*fo;if(r.dist!=null)a.dist_s+=r.dist*fo;if(r.ppk!=null)a.ppk_s+=r.ppk*fo;
              if(r.surge!=null)a.surge_s+=r.surge*fo;if(r.ata!=null)a.ata_s+=r.ata*fo;
-             if(r.oar!=null)a.oar_s+=r.oar*fo;if(r.par!=null)a.par_s+=r.par*fo;if(r.rpr!=null)a.rpr_s+=r.rpr*fo;}
+             if(r.oar!=null)a.oar_s+=r.oar*fo;if(r.par!=null)a.par_s+=r.par*fo;if(r.rpr!=null)a.rpr_s+=r.rpr*fo;
+             if(r.oot_gs!=null){a.oot_gs_s+=r.oot_gs*fo;a.oot_gs_w+=fo;}
+             if(r.ar_in!=null) {a.ar_in_s +=r.ar_in *fo;a.ar_in_w +=fo;}
+             if(r.ar_out!=null){a.ar_out_s+=r.ar_out*fo;a.ar_out_w+=fo;}}
     if(gv>0){if(r.dspend!=null){a.dspend_s+=r.dspend*gv;a.dspend_w+=gv;}
              if(r.sspend!=null){a.sspend_s+=r.sspend*gv;a.sspend_w+=gv;}
              if(r.bspend!=null){a.bspend_s+=r.bspend*gv;a.bspend_w+=gv;}
@@ -684,7 +730,10 @@ function accVal(a,k){
     oar:a.f>0?a.oar_s/a.f:null,par:a.f>0?a.par_s/a.f:null,rpr:a.f>0?a.rpr_s/a.f:null,
     dspend:a.dspend_w>0?a.dspend_s/a.dspend_w:null,sspend:a.sspend_w>0?a.sspend_s/a.sspend_w:null,
     bspend:a.bspend_w>0?a.bspend_s/a.bspend_w:null,dcc:a.dcc_w>0?a.dcc_s/a.dcc_w:null,
-    sspend_ex:a.sspend_ex_w>0?a.sspend_ex_s/a.sspend_ex_w:null};
+    sspend_ex:a.sspend_ex_w>0?a.sspend_ex_s/a.sspend_ex_w:null,
+    oot_gs:a.oot_gs_w>0?a.oot_gs_s/a.oot_gs_w:null,
+    ar_in: a.ar_in_w >0?a.ar_in_s /a.ar_in_w :null,
+    ar_out:a.ar_out_w>0?a.ar_out_s/a.ar_out_w:null};
   return v[k]??null;
 }
 // Aggregate across all selected cities per period, return [{pk, val}]
@@ -697,7 +746,8 @@ function aggSum(byP,k){
       sc_s:0,s2f_s:0,s2o_s:0,o2f_s:0,oot_s:0,
       arp_s:0,dist_s:0,ppk_s:0,surge_s:0,ata_s:0,oar_s:0,par_s:0,rpr_s:0,
       dspend_s:0,dspend_w:0,sspend_s:0,sspend_w:0,bspend_s:0,bspend_w:0,
-      dcc_s:0,dcc_w:0,sspend_ex_s:0,sspend_ex_w:0};
+      dcc_s:0,dcc_w:0,sspend_ex_s:0,sspend_ex_w:0,
+      oot_gs_s:0,oot_gs_w:0,ar_in_s:0,ar_in_w:0,ar_out_s:0,ar_out_w:0};
     for(const[,a]of cm)for(const key of Object.keys(merged))merged[key]+=a[key]||0;
     return{pk,val:accVal(merged,k)};
   });
@@ -721,7 +771,8 @@ function secTotals(byP){
     sc_s:0,s2f_s:0,s2o_s:0,o2f_s:0,oot_s:0,
     arp_s:0,dist_s:0,ppk_s:0,surge_s:0,ata_s:0,oar_s:0,par_s:0,rpr_s:0,
     dspend_s:0,dspend_w:0,sspend_s:0,sspend_w:0,bspend_s:0,bspend_w:0,
-    dcc_s:0,dcc_w:0,sspend_ex_s:0,sspend_ex_w:0};
+    dcc_s:0,dcc_w:0,sspend_ex_s:0,sspend_ex_w:0,
+    oot_gs_s:0,oot_gs_w:0,ar_in_s:0,ar_in_w:0,ar_out_s:0,ar_out_w:0};
   for(const[,cm]of byP)for(const[,a]of cm)for(const k of Object.keys(st))st[k]+=a[k]||0;
   return Object.fromEntries(ALL_MK.map(k=>[k,accVal(st,k)]));
 }
@@ -744,7 +795,8 @@ function fMetric(k,v){if(v==null||isNaN(v))return'—';
     orders:()=>fNum(v),paid:()=>fH(v),eoh:()=>fH(v),nra:()=>fNum(v),
     oar:()=>fPct(v),par:()=>fPct(v),paid_util:()=>fPct(v),eutil:()=>fPct(v),
     eph_b:()=>fEur(v),o2f:()=>fPct(v),oot:()=>fPct(v),rpr:()=>v.toFixed(2),
-    dspend:()=>fPct(v),sspend:()=>fPct(v),bspend:()=>fPct(v),dcc:()=>fPct(v),sspend_ex:()=>fPct(v)}[k]?.()??v.toFixed(2);}
+    dspend:()=>fPct(v),sspend:()=>fPct(v),bspend:()=>fPct(v),dcc:()=>fPct(v),sspend_ex:()=>fPct(v),
+    oot_gs:()=>fPct(v),ar_in:()=>fPct(v),ar_out:()=>fPct(v)}[k]?.()??v.toFixed(2);}
 function pct(c,p){if(!p||p===0)return null;return(c-p)/Math.abs(p)*100;}
 function mLabel(k){return{f:'Finished Orders',g:'GMV',n:'Net Rate %',o:'Online Hours',
   ap:'Active Partners',pa:'Partner Activations',eph:'EPH',rph:'RPH',hpad:'Hrs / Driver',util:'Utilisation',
@@ -754,7 +806,8 @@ function mLabel(k){return{f:'Finished Orders',g:'GMV',n:'Net Rate %',o:'Online H
   oar:'Order Accept. Rate',par:'Partner Accept. Rate',paid_util:'Paid Utilisation',
   eutil:'Eff. Utilisation',eph_b:'EPH (w/ bonuses)',o2f:'O2F %',oot:'Opt. Order Try %',
   rpr:'Rides / Active Rider',dspend:'Demand Spend %',sspend:'Supply Spend %',
-  bspend:'Branding Spend %',dcc:'Dyn. Commission %',sspend_ex:'Supply Spend % (ex. brand)'}[k]||k;}
+  bspend:'Branding Spend %',dcc:'Dyn. Commission %',sspend_ex:'Supply Spend % (ex. brand)',
+  oot_gs:'% Outside Search Radius',ar_in:'AR Inside Search Radius',ar_out:'AR Outside Search Radius'}[k]||k;}
 function fMetricAp(k,v){if(v==null||isNaN(v))return'—';
   return{f:()=>fNum(v),g:()=>fGMV(v),n:()=>fPct(v),o:()=>fNum(v,0)+' h',
     ap:()=>fNum(v),pa:()=>fNum(v),eph:()=>fEur(v),rph:()=>fRPH(v),hpad:()=>fH(v),util:()=>fPct(v),
@@ -763,7 +816,8 @@ function fMetricAp(k,v){if(v==null||isNaN(v))return'—';
     orders:()=>fNum(v),paid:()=>fH(v),eoh:()=>fH(v),nra:()=>fNum(v),
     oar:()=>fPct(v),par:()=>fPct(v),paid_util:()=>fPct(v),eutil:()=>fPct(v),
     eph_b:()=>fEur(v),o2f:()=>fPct(v),oot:()=>fPct(v),rpr:()=>v.toFixed(2),
-    dspend:()=>fPct(v),sspend:()=>fPct(v),bspend:()=>fPct(v),dcc:()=>fPct(v),sspend_ex:()=>fPct(v)}[k]?.()??v.toFixed(2);}
+    dspend:()=>fPct(v),sspend:()=>fPct(v),bspend:()=>fPct(v),dcc:()=>fPct(v),sspend_ex:()=>fPct(v),
+    oot_gs:()=>fPct(v),ar_in:()=>fPct(v),ar_out:()=>fPct(v)}[k]?.()??v.toFixed(2);}
 
 // ── CITY PILLS ────────────────────────────────────────────────────────
 function citySetEq(a,b){return a.length===b.length&&[...a].sort().every((c,i)=>[...b].sort()[i]===c);}
@@ -856,6 +910,14 @@ function renderSecondary(){
     card('Price per km',  'ppk',  cur.ppk,   prv.ppk,   fEur),
     card('Surge',         'surge',cur.surge, prv.surge, fSurge),
     card('ATA',           'ata',  cur.ata,   prv.ata,   fATA),
+  ].join('');
+  document.getElementById('quality-cards').innerHTML=[
+    card('O2F %',                  'o2f',    cur.o2f,    prv.o2f,    fPct),
+    card('Order Accept. Rate',     'oar',    cur.oar,    prv.oar,    fPct),
+    card('Partner Accept. Rate',   'par',    cur.par,    prv.par,    fPct),
+    card('% Outside Search Radius','oot_gs', cur.oot_gs, prv.oot_gs, fPct),
+    card('AR Inside Search Radius','ar_in',  cur.ar_in,  prv.ar_in,  fPct),
+    card('AR Outside Search Radius','ar_out',cur.ar_out, prv.ar_out, fPct),
   ].join('');
 }
 
@@ -1114,10 +1176,14 @@ const HIST_COLS=[
   {id:'pricing',label:'Pricing',  cls:'sec-hdr-pricing', metrics:[
     {k:'arp',label:'Avg Price'},{k:'dist',label:'Avg Dist.'},{k:'ppk',label:'Price/km'},{k:'surge',label:'Surge'},{k:'ata',label:'ATA'},
   ]},
+  {id:'quality',label:'Quality',  cls:'sec-hdr-quality', metrics:[
+    {k:'o2f',   label:'O2F %'},{k:'oar',   label:'OAR %'},{k:'par',   label:'PAR %'},
+    {k:'oot_gs',label:'% Outsd.SR'},{k:'ar_in',label:'AR In SR'},{k:'ar_out',label:'AR Out SR'},
+  ]},
 ];
 
 // Metrics where change is expressed in percentage points (pp) not relative %
-function isPct(k){return['n','util','sc','s2f','s2o','oar','paid_util','eutil','par','o2f','oot','dspend','sspend','bspend','dcc','sspend_ex'].includes(k);}
+function isPct(k){return['n','util','sc','s2f','s2o','oar','paid_util','eutil','par','o2f','oot','dspend','sspend','bspend','dcc','sspend_ex','oot_gs','ar_in','ar_out'].includes(k);}
 function chgVal(k,cur,prv){
   if(cur==null||prv==null)return null;
   if(isPct(k))return cur-prv;
@@ -1129,7 +1195,7 @@ function chgStr(k,ch){
 }
 
 // ── ALL-TIME-HIGH ─────────────────────────────────────────────────────
-const ALL_MK=['f','g','n','o','ap','pa','eph','rph','hpad','util','ar','sess','sc','s2f','s2o','arp','dist','ppk','surge','ata','orders','paid','eoh','nra','oar','paid_util','eutil','eph_b','par','o2f','rpr','dspend','sspend','bspend','dcc','sspend_ex','oot'];
+const ALL_MK=['f','g','n','o','ap','pa','eph','rph','hpad','util','ar','sess','sc','s2f','s2o','arp','dist','ppk','surge','ata','orders','paid','eoh','nra','oar','paid_util','eutil','eph_b','par','o2f','rpr','dspend','sspend','bspend','dcc','sspend_ex','oot','oot_gs','ar_in','ar_out'];
 
 // GLOBAL_CITY_ATH: per-city ATH from the ENTIRE dataset (all cities, all dates).
 // Recomputed only when granularity changes — never affected by city selection or date range.
@@ -1176,7 +1242,8 @@ function buildMerged(cm){
     sc_s:0,s2f_s:0,s2o_s:0,o2f_s:0,oot_s:0,
     arp_s:0,dist_s:0,ppk_s:0,surge_s:0,ata_s:0,oar_s:0,par_s:0,rpr_s:0,
     dspend_s:0,dspend_w:0,sspend_s:0,sspend_w:0,bspend_s:0,bspend_w:0,
-    dcc_s:0,dcc_w:0,sspend_ex_s:0,sspend_ex_w:0};
+    dcc_s:0,dcc_w:0,sspend_ex_s:0,sspend_ex_w:0,
+    oot_gs_s:0,oot_gs_w:0,ar_in_s:0,ar_in_w:0,ar_out_s:0,ar_out_w:0};
   for(const[,a]of cm)for(const k of Object.keys(m))m[k]+=a[k]||0;
   return m;
 }
@@ -1460,7 +1527,7 @@ function renderAll(){
   computeGlobalCityATH();
   computeATH();
   renderPills();renderKPIs();renderSecondary();renderChart();
-  for(const id of['supply','demand','pricing','general']){renderSecPills(id);renderSecChart(id);}
+  for(const id of['supply','demand','pricing','quality','general']){renderSecPills(id);renderSecChart(id);}
   renderHistoricalTable();
   // Hide pricing gap section when YoY mode is active
   const ps=document.getElementById('pricing-section');
