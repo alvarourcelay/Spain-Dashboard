@@ -485,12 +485,12 @@ const SECTIONS = {
   },
   quality: {
     metrics: [
-      {k:'o2f',    label:'O2F %',              bar:true },
-      {k:'oar',    label:'Order Accept. Rate', bar:true },
-      {k:'par',    label:'Partner Accept.',    bar:true },
-      {k:'oot_gs', label:'% Outside Radius',   bar:true },
-      {k:'ar_in',  label:'AR Inside Radius',   bar:true },
-      {k:'ar_out', label:'AR Outside Radius',  bar:true },
+      {k:'o2f',    label:'O2F %',              bar:false},
+      {k:'oar',    label:'Order Accept. Rate', bar:false},
+      {k:'par',    label:'Partner Accept.',    bar:false},
+      {k:'oot_gs', label:'% Outside Radius',   bar:false},
+      {k:'ar_in',  label:'AR Inside Radius',   bar:false},
+      {k:'ar_out', label:'AR Outside Radius',  bar:false},
     ],
     default:['o2f'],
     inst: null,
@@ -1256,10 +1256,13 @@ function renderHistoricalTable(){
   // Thead: row1 = section spans, row2 = metric names (val|Δ% each)
   let th1='<tr><th class="period-hdr" rowspan="2" style="min-width:36px;width:36px;left:0;position:sticky">Day</th><th class="period-hdr" rowspan="2" style="left:36px;position:sticky">Period</th>';
   let th2='<tr>';
+  let _hci=0;
   for(const sec of HIST_COLS){
     th1+=`<th colspan="${sec.metrics.length*2}" class="metric-hdr ${sec.cls}">${sec.label}</th>`;
     for(const m of sec.metrics){
-      th2+=`<th class="metric-hdr" style="font-weight:600">${m.label}</th><th class="metric-hdr" style="color:#888">${yoyMode?'YoY':'Δ%'}</th>`;
+      const _hcs=_hci%2===0?'':'background:rgba(0,0,0,0.04)';
+      _hci++;
+      th2+=`<th class="metric-hdr" style="font-weight:600;${_hcs}">${m.label}</th><th class="metric-hdr" style="color:#888;${_hcs}">${yoyMode?'YoY':'Δ%'}</th>`;
     }
   }
   th1+='</tr>';th2+='</tr>';
@@ -1291,6 +1294,7 @@ function renderHistoricalTable(){
     }
     const dayStr=S.gran==='daily'?['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][new Date(pk+'T00:00:00').getDay()]:'';
     let row=`<td class="hist-day">${dayStr}</td><td class="hist-period">${periodLabel(pk,S.gran)}</td>`;
+    let _rci=0;
     for(const sec of HIST_COLS){
       for(const m of sec.metrics){
         const val=accVal(cur,m.k);
@@ -1303,7 +1307,9 @@ function renderHistoricalTable(){
           isPct(m.k)?((chg>=0?'+':'')+chg.toFixed(1)+' pp'):
           ((chg>=0?'+':'')+chg.toFixed(1)+'%');
         const rkt=isATH(m.k,val)?` ${ROCKET}`:'';
-        row+=`<td class="hist-val">${fMetricAp(m.k,val)}${rkt}</td><td class="hist-chg ${chgCls}">${chgStr}</td>`;
+        const _rcs=_rci%2===0?'':'background:rgba(0,0,0,0.035)';
+        _rci++;
+        row+=`<td class="hist-val" style="${_rcs}">${fMetricAp(m.k,val)}${rkt}</td><td class="hist-chg ${chgCls}" style="${_rcs}">${chgStr}</td>`;
       }
     }
     tbody+=`<tr data-pk="${pk}">${row}</tr>`;
