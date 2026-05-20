@@ -141,7 +141,7 @@ def load_data():
         # Derived rates
         s2f  = (sess_fo / sess * 100)    if sess  and sess_fo  is not None else None
         s2o  = (sess_o  / sess * 100)    if sess  and sess_o   is not None else None
-        sc   = (srch_sup / searches * 100) if searches and srch_sup is not None else None
+        sc   = (srch_sup / sess * 100)     if sess    and srch_sup is not None else None
         arp  = (g / f)                   if f else None
         dist = (dist_km / f)             if f and dist_km is not None else None
         ppk  = (g / dist_km)             if dist_km else None
