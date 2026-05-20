@@ -53,7 +53,11 @@ SELECT
   -- (best approximation for daily city-level aggregation without raw partner/rider tables)
   SUM(CAST(na.rides_net_rate_eur_local                        AS DOUBLE) * a.rides_orders_in_finished_state_local) AS n_wsum,
   SUM(CAST(na.rides_partners_with_orders_finished_local       AS DOUBLE) * a.rides_orders_in_finished_state_local) AS ap_wsum,
-  SUM(CAST(na.rides_users_with_orders_finished_local          AS DOUBLE) * a.rides_orders_in_finished_state_local) AS ar_wsum
+  SUM(CAST(na.rides_users_with_orders_finished_local          AS DOUBLE) * a.rides_orders_in_finished_state_local) AS ar_wsum,
+
+  -- Search-radius quality metrics
+  -- ar_in_wsum = SUM(rate_inside_SR × tries_inside_SR): weighted accepted count inside SR
+  SUM(CAST(na.rides_order_try_nonoptional_acceptance_rate_local AS DOUBLE) * a.rides_order_tries_nonoptional_created_local) AS ar_in_wsum
 
 FROM hive_metastore.mart_models_spark.mart_city_hour_local_rides a
 LEFT JOIN hive_metastore.mart_models_spark.mart_non_additive_city_hour_local_rides na
@@ -129,9 +133,10 @@ def load_data():
         bspend_eur = _safe(r['bspend_eur'])
         dcc_eur    = _safe(r['dcc_eur'])
 
-        n_ws  = _safe(r['n_wsum'])
-        ap_ws = _safe(r['ap_wsum'])
-        ar_ws = _safe(r['ar_wsum'])
+        n_ws      = _safe(r['n_wsum'])
+        ap_ws     = _safe(r['ap_wsum'])
+        ar_ws     = _safe(r['ar_wsum'])
+        ar_in_wsum= _safe(r['ar_in_wsum'])
 
         # Derived rates
         s2f  = (sess_fo / sess * 100)    if sess  and sess_fo  is not None else None
@@ -145,6 +150,17 @@ def load_data():
         oar  = (tries_acc / tries_tot * 100) if tries_tot and tries_acc is not None else None
         o2f  = (f / orders * 100)        if orders else None
         oot  = ((tries_tot - (tries_nonopt or 0)) / tries_tot * 100) if tries_tot else None
+
+        # Search-radius quality metrics
+        # oot_gs = same as oot: % of order tries outside search radius
+        oot_gs = oot
+        # ar_in: acceptance rate inside SR (rate stored as decimal 0-1 in mart)
+        ar_in  = (ar_in_wsum / tries_nonopt * 100) \
+                 if tries_nonopt and ar_in_wsum is not None else None
+        # ar_out: derived — accepted_outside = total_accepted - accepted_inside
+        tries_opt = (tries_tot or 0) - (tries_nonopt or 0)
+        ar_out = ((tries_acc - ar_in_wsum) / tries_opt * 100) \
+                 if tries_opt and tries_acc is not None and ar_in_wsum is not None else None
         util = (order_sec / o_s * 100)   if o_s else None
         paid_util = (paid_sec / o_s * 100) if o_s else None
         eutil= (eoh_sec / o_s * 100)     if o_s else None
@@ -192,6 +208,7 @@ def load_data():
             'dspend': dspend, 'sspend': sspend,
             'bspend': bspend, 'dcc': dcc, 'sspend_ex': sspend_ex,
             'nra': nra, 'oot': oot,
+            'oot_gs': oot_gs, 'ar_in': ar_in, 'ar_out': ar_out,
         })
 
     return data
