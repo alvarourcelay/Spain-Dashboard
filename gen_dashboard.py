@@ -7,6 +7,7 @@ import csv, json, os
 from datetime import datetime, timedelta
 from pricing_loader import load_pricing_data
 from quality_loader import load_quality_data
+from budget_loader  import load_budget_data
 
 LAUNCH_DATES = {
     'A Coruña':  '2025-09-24', 'Alicante':  '2026-02-27',
@@ -89,16 +90,23 @@ print('Loading pricing data from Google Sheets…')
 pricing_data    = load_pricing_data()
 pricing_json    = json.dumps(pricing_data, separators=(',',':'))
 
-# ── Load quality data from Google Sheets ─────────────────────────────────────
-print('Loading quality data from Google Sheets…')
-quality_raw = load_quality_data()  # {city: {date: {oot_gs, ar_in, ar_out}}}
-
-# Merge quality fields into each data row (left-join on city + date)
-for row in data:
-    q = quality_raw.get(row['c'], {}).get(row['d'], {})
-    row['oot_gs'] = q.get('oot_gs')
-    row['ar_in']  = q.get('ar_in')
-    row['ar_out'] = q.get('ar_out')
+# ── Load quality data ─────────────────────────────────────────────────────────
+if DATA_SOURCE == 'databricks':
+    # Quality metrics already loaded from Databricks — just ensure keys exist
+    print('Quality metrics loaded from Databricks ✓')
+    for row in data:
+        row.setdefault('oot_gs', None)
+        row.setdefault('ar_in',  None)
+        row.setdefault('ar_out', None)
+else:
+    # CSV mode: fetch from Google Sheets (Looker export)
+    print('Loading quality data from Google Sheets…')
+    quality_raw = load_quality_data()
+    for row in data:
+        q = quality_raw.get(row['c'], {}).get(row['d'], {})
+        row['oot_gs'] = q.get('oot_gs')
+        row['ar_in']  = q.get('ar_in')
+        row['ar_out'] = q.get('ar_out')
 all_cities   = sorted(set(d['c'] for d in data))
 min_date     = min(d['d'] for d in data)
 max_date     = max(d['d'] for d in data)
@@ -108,6 +116,10 @@ ros_cities       = sorted([c for c in all_cities if c not in ROS_EXCLUDE])
 
 palette = ['#2A9C64','#0C2C1C','#52B882','#1B6843','#7DCE9E','#3A8060','#A5E5C0','#0A4228','#68B890','#1E4534','#B0EDD6']
 city_colors = {c: palette[i % len(palette)] for i,c in enumerate(all_cities)}
+
+print('Loading budget data…')
+budget_raw  = load_budget_data()
+budget_json = json.dumps(budget_raw, separators=(',',':'))
 
 data_json      = json.dumps(data,             separators=(',',':'))
 cities_json    = json.dumps(all_cities,       separators=(',',':'))
@@ -164,7 +176,7 @@ nav{background:var(--d);padding:0 28px;height:56px;display:flex;align-items:cent
 .kpi-section{display:flex;flex-direction:column;gap:10px}
 .kpi-mode-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .kpi-mode-label{font-size:11px;font-weight:600;color:var(--t2);text-transform:uppercase;letter-spacing:.5px}
-.kpi-row{display:grid;grid-template-columns:repeat(5,1fr);gap:14px}
+.kpi-row{display:grid;grid-template-columns:repeat(7,1fr);gap:14px}
 .kpi-card{background:var(--w);border:1px solid var(--border);border-radius:12px;padding:20px 22px;border-top:3px solid var(--g)}
 .kpi-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--t2);margin-bottom:10px}
 .kpi-val{font-size:28px;font-weight:800;color:var(--d);line-height:1;letter-spacing:-.5px}
@@ -270,6 +282,24 @@ tbody td:first-child{font-weight:600;color:var(--d)}
 .pgap-legend-dot{width:10px;height:10px;border-radius:2px}
 .pgap-dot{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:middle}
 .pgap-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:12px}
+
+/* BUDGETING SECTION */
+.bdg-controls{display:flex;gap:16px;align-items:flex-end;margin-bottom:20px;flex-wrap:wrap}
+.bdg-kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:22px}
+.bdg-kpi-card{background:var(--w);border:1px solid var(--border);border-radius:12px;padding:18px 20px;border-top:3px solid var(--g)}
+.bdg-kpi-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--t2);margin-bottom:8px}
+.bdg-kpi-actual{font-size:26px;font-weight:800;color:var(--d);line-height:1;letter-spacing:-.5px;margin-bottom:4px}
+.bdg-kpi-budget{font-size:12px;color:var(--t2);margin-bottom:5px;font-weight:500}
+.bdg-kpi-pct{font-size:13px;font-weight:700}
+.bdg-kpi-pct.pos{color:#2A9C64}.bdg-kpi-pct.neg{color:#c0392b}.bdg-kpi-pct.nil{color:#aaa}
+.bdg-chart-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
+.bdg-chart-card{background:var(--cbg);border:1px solid var(--border);border-radius:10px;padding:16px 18px}
+.bdg-chart-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--d);margin-bottom:14px;display:flex;justify-content:space-between;align-items:center}
+.bdg-chart-attain{font-size:11px;font-weight:600;letter-spacing:0}
+.bdg-chart-wrap{position:relative;height:260px}
+.bdg-empty{padding:48px;text-align:center;color:#999;font-style:italic}
+@media(max-width:1000px){.bdg-chart-grid{grid-template-columns:1fr}}
+@media(max-width:700px){.bdg-kpi-grid{grid-template-columns:repeat(2,1fr)}}
 </style>
 </head>
 <body>
@@ -329,11 +359,13 @@ tbody td:first-child{font-weight:600;color:var(--d)}
     <div class="card-header">
       <div><div class="card-title">Marketplace</div><div class="chart-note" id="chart-note"></div></div>
       <div class="metric-checks">
-        <button class="mcheck active"     data-m="f" onclick="toggleMetric(this)"><span class="mcheck-tick">✓</span> Finished Orders</button>
-        <button class="mcheck"            data-m="g" onclick="toggleMetric(this)"><span class="mcheck-tick">✓</span> GMV</button>
-        <button class="mcheck mcheck-bar" data-m="n"    onclick="toggleMetric(this)"><span class="mcheck-tick">✓</span> Net Rate % ▐</button>
-        <button class="mcheck"            data-m="o"    onclick="toggleMetric(this)"><span class="mcheck-tick">✓</span> Online Hours</button>
-        <button class="mcheck"            data-m="sess" onclick="toggleMetric(this)"><span class="mcheck-tick">✓</span> Sessions</button>
+        <button class="mcheck active"     data-m="f"      onclick="toggleMetric(this)"><span class="mcheck-tick">✓</span> Finished Orders</button>
+        <button class="mcheck"            data-m="g"      onclick="toggleMetric(this)"><span class="mcheck-tick">✓</span> GMV</button>
+        <button class="mcheck mcheck-bar" data-m="n"      onclick="toggleMetric(this)"><span class="mcheck-tick">✓</span> Net Rate % ▐</button>
+        <button class="mcheck"            data-m="o"      onclick="toggleMetric(this)"><span class="mcheck-tick">✓</span> Online Hours</button>
+        <button class="mcheck"            data-m="sess"   onclick="toggleMetric(this)"><span class="mcheck-tick">✓</span> Sessions</button>
+        <button class="mcheck mcheck-bar" data-m="dspend" onclick="toggleMetric(this)"><span class="mcheck-tick">✓</span> Demand Spend % ▐</button>
+        <button class="mcheck mcheck-bar" data-m="sspend" onclick="toggleMetric(this)"><span class="mcheck-tick">✓</span> Supply Spend % ▐</button>
       </div>
     </div>
     <div class="chart-wrap"><canvas id="chart"></canvas></div>
@@ -424,6 +456,46 @@ tbody td:first-child{font-weight:600;color:var(--d)}
     </div>
   </div>
 
+  <!-- BUDGETING -->
+  <div class="sec-section" id="budget-section">
+    <div class="sec-hdr" style="gap:12px">
+      Budget vs Actual
+      <div class="seg" style="margin-left:auto">
+        <button class="seg-btn active" id="bdg-annual-btn" onclick="setBudgetType('annual')">Annual</button>
+        <button class="seg-btn"        id="bdg-monthly-btn" onclick="setBudgetType('monthly')">Monthly</button>
+      </div>
+    </div>
+
+    <div class="bdg-controls">
+      <div>
+        <div class="pricing-flabel">CITY</div>
+        <select class="pricing-select" id="bdg-city" onchange="renderBudget()"></select>
+      </div>
+      <div id="bdg-period-note" style="color:var(--t2);font-size:12px;padding-bottom:2px"></div>
+    </div>
+
+    <div class="bdg-kpi-grid" id="bdg-kpis"></div>
+
+    <div class="bdg-chart-grid">
+      <div class="bdg-chart-card">
+        <div class="bdg-chart-title">GMV <span class="bdg-chart-attain" id="bdg-att-gmv"></span></div>
+        <div class="bdg-chart-wrap"><canvas id="bdg-chart-gmv"></canvas></div>
+      </div>
+      <div class="bdg-chart-card">
+        <div class="bdg-chart-title">Finished Orders <span class="bdg-chart-attain" id="bdg-att-orders"></span></div>
+        <div class="bdg-chart-wrap"><canvas id="bdg-chart-orders"></canvas></div>
+      </div>
+      <div class="bdg-chart-card">
+        <div class="bdg-chart-title">ASP (Avg. Selling Price) <span class="bdg-chart-attain" id="bdg-att-asp"></span></div>
+        <div class="bdg-chart-wrap"><canvas id="bdg-chart-asp"></canvas></div>
+      </div>
+      <div class="bdg-chart-card">
+        <div class="bdg-chart-title">Net Rate (€) <span class="bdg-chart-attain" id="bdg-att-nr"></span></div>
+        <div class="bdg-chart-wrap"><canvas id="bdg-chart-nr"></canvas></div>
+      </div>
+    </div>
+  </div>
+
   <!-- HISTORICAL PERFORMANCE TABLE -->
   <div class="hist-card">
     <div class="card-header">
@@ -441,7 +513,8 @@ const ALL_CITIES  = __CITIES__;
 const CITY_COLORS = __COLORS__;
 const EXPANSION   = __EXPANSION__;
 const ROS         = __ROS__;
-const PRICING_DATA = __PRICING_DATA__;
+const PRICING_DATA  = __PRICING_DATA__;
+const BUDGET_DATA   = __BUDGET_DATA__;
 const DATA_MIN    = '__MIN_DATE__';
 const DATA_MAX    = '__MAX_DATE__';
 
@@ -760,9 +833,15 @@ function aggCity(byP,city,k){
   }).filter(Boolean);
 }
 function totals(byP){
-  let f=0,g=0,ns=0,nw=0,o=0,sess=0;
-  for(const[,cm]of byP)for(const[,a]of cm){f+=a.f;g+=a.g;ns+=a.ns;nw+=a.nw;o+=a.o;sess+=a.sess;}
-  return{f,g,n:nw>0?ns/nw:null,o,sess};
+  let f=0,g=0,ns=0,nw=0,o=0,sess=0,dspend_s=0,dspend_w=0,sspend_s=0,sspend_w=0;
+  for(const[,cm]of byP)for(const[,a]of cm){
+    f+=a.f;g+=a.g;ns+=a.ns;nw+=a.nw;o+=a.o;sess+=a.sess;
+    dspend_s+=a.dspend_s;dspend_w+=a.dspend_w;
+    sspend_s+=a.sspend_s;sspend_w+=a.sspend_w;
+  }
+  return{f,g,n:nw>0?ns/nw:null,o,sess,
+    dspend:dspend_w>0?dspend_s/dspend_w:null,
+    sspend:sspend_w>0?sspend_s/sspend_w:null};
 }
 function secTotals(byP){
   // build merged accumulator from all city/period data
@@ -868,7 +947,7 @@ function renderKPIs(){
   const pStr=kpiPeriodLabel();
   const vsLbl=yoyMode?'vs LY':'vs prev.';
   document.getElementById('kpi-row').innerHTML=
-    [{k:'f',label:'Finished Orders'},{k:'g',label:'GMV'},{k:'n',label:'Net Rate (wtd. avg.)'},{k:'o',label:'Online Hours'},{k:'sess',label:'Sessions'}]
+    [{k:'f',label:'Finished Orders'},{k:'g',label:'GMV'},{k:'n',label:'Net Rate (wtd. avg.)'},{k:'o',label:'Online Hours'},{k:'sess',label:'Sessions'},{k:'dspend',label:'Demand Spend %'},{k:'sspend',label:'Supply Spend %'}]
     .map(({k,label})=>{
       const val=cur[k];
       const ch=chgVal(k,val,prv[k]);
@@ -1061,13 +1140,15 @@ function renderSecChart(secId){
 }
 
 // ── MAIN CHART ────────────────────────────────────────────────────────
-const METRIC_COLORS={f:'#2A9C64',g:'#0C2C1C',n:'#2A9C64',o:'#3B82F6',sess:'#F5B800'};
-const METRIC_DASH  ={f:[],g:[6,4],o:[2,4],sess:[10,3]};
+const METRIC_COLORS={f:'#2A9C64',g:'#0C2C1C',n:'#2A9C64',o:'#3B82F6',sess:'#F5B800',dspend:'#F97316',sspend:'#A855F7'};
+const METRIC_DASH  ={f:[],g:[6,4],o:[2,4],sess:[10,3],dspend:[4,3],sspend:[8,3,2,3]};
+const MK_BAR=new Set(['n','dspend','sspend']);  // metrics rendered as bars on right Y-axis
 let mainChart=null;
 function renderChart(){
   const rows=filteredRows(),byP=aggregate(rows),periods=[...byP.keys()].sort();
   const labels=chartLabels(periods);
-  const lineMs=S.metrics.filter(m=>m!=='n'),hasNR=S.metrics.includes('n');
+  const lineMs=S.metrics.filter(m=>!MK_BAR.has(m));
+  const barMs =S.metrics.filter(m=> MK_BAR.has(m));
   const multiM=S.metrics.length>1,normalize=lineMs.length>1;
   const datasets=[];
   const normAvgs={};  // store per-metric avg for LY normalization
@@ -1085,10 +1166,14 @@ function renderChart(){
         borderWidth:2.5,pointRadius:periods.length>90?0:3,pointHoverRadius:5,tension:.3,spanGaps:false,
         _athFlags:athFlags,_rawData:normalize?rawData:null,_mk:m});
     }
-    if(hasNR){const agg=aggSum(byP,'n');const pmap=Object.fromEntries(agg.map(d=>[d.pk,d.val]));
-      const nrData=periods.map(p=>pmap[p]??null);
-      datasets.push({label:'Net Rate %',data:nrData,type:'bar',yAxisID:'yRight',
-        backgroundColor:'#2A9C6455',borderColor:'#2A9C64',borderWidth:1.5,order:10,_athFlags:nrData.map(v=>isATH('n',v)),_mk:'n'});}
+    for(const bm of barMs){
+      const agg=aggSum(byP,bm);const pmap=Object.fromEntries(agg.map(d=>[d.pk,d.val]));
+      const bData=periods.map(p=>pmap[p]??null);
+      const col=METRIC_COLORS[bm]||'#2A9C64';
+      datasets.push({label:mLabel(bm),data:bData,type:'bar',yAxisID:'yRight',
+        backgroundColor:col+'55',borderColor:col,borderWidth:1.5,order:10,
+        _athFlags:bData.map(v=>isATH(bm,v)),_mk:bm});
+    }
   }else{
     const m=S.metrics[0];
     S.cities.forEach((city,ci)=>{
@@ -1096,7 +1181,7 @@ function renderChart(){
       const data=periods.map(p=>pmap[p]??null),col=CITY_COLORS[city];
       const dash=SEC_DASHES[Math.floor(ci/SEC_COLORS.length)%SEC_DASHES.length];
       const athFlags=data.map(v=>isCityATH(city,m,v));
-      if(m==='n'){datasets.push({label:city,data,type:'bar',yAxisID:'yRight',backgroundColor:col+'88',borderColor:col,borderWidth:1.5,order:10,_athFlags:athFlags,_mk:m});}
+      if(MK_BAR.has(m)){datasets.push({label:city,data,type:'bar',yAxisID:'yRight',backgroundColor:col+'88',borderColor:col,borderWidth:1.5,order:10,_athFlags:athFlags,_mk:m});}
       else{datasets.push({label:city,data,type:'line',yAxisID:'yLeft',borderColor:col,backgroundColor:col+'22',borderDash:dash,borderWidth:2,
         pointRadius:periods.length>90?0:3,pointHoverRadius:5,tension:.3,spanGaps:false,_athFlags:athFlags,_mk:m});}
     });
@@ -1105,22 +1190,20 @@ function renderChart(){
   if(yoyMode){
     const yr=yoyRange();
     const byP_ly=aggregate(filteredRows(yr.from,yr.to));
-    const metricsToOverlay=multiM?lineMs:(S.metrics[0]==='n'?[]:S.metrics);
+    const metricsToOverlay=multiM?lineMs:(MK_BAR.has(S.metrics[0])?[]:S.metrics);
     for(const m of metricsToOverlay){
       let lyData=periods.map(pk=>lyAggAtPeriod(byP_ly,lyPeriodKey(pk),m));
-      // Apply same normalization as CY so both series share the same index scale
-      if(normalize&&normAvgs[m]){
-        const avg=normAvgs[m];
-        lyData=lyData.map(v=>v!=null?(v/avg)*100:null);
-      }
+      if(normalize&&normAvgs[m]){const avg=normAvgs[m];lyData=lyData.map(v=>v!=null?(v/avg)*100:null);}
       const baseCol=METRIC_COLORS[m]||'#888';
       datasets.push({label:mLabel(m)+' (LY)',data:lyData,type:'line',yAxisID:'yLeft',
         borderColor:baseCol+'88',backgroundColor:'transparent',borderDash:[6,4],
         borderWidth:1.5,pointRadius:0,tension:.3,spanGaps:false,_mk:m,_rawData:null});
     }
   }
-  const showLeft=lineMs.length>0,showRight=hasNR||S.metrics[0]==='n';
+  const showLeft=lineMs.length>0||(S.metrics.length===1&&!MK_BAR.has(S.metrics[0]));
+  const showRight=barMs.length>0||(S.metrics.length===1&&MK_BAR.has(S.metrics[0]));
   const leftLabel=normalize?'Index (avg = 100)':(lineMs.length===1?mLabel(lineMs[0]):'');
+  const rightLabel=barMs.length===1?mLabel(barMs[0]):(showRight&&S.metrics.length===1?mLabel(S.metrics[0]):'%');
   document.getElementById('chart-note').textContent=
     multiM&&normalize?'Multiple metrics — normalized (avg = 100). Hover to see real values.':multiM?'Aggregated across selected cities.':(yoyMode?'Solid = current year · Dashed = same period last year':'');
   if(mainChart){mainChart.destroy();mainChart=null;}
@@ -1150,8 +1233,8 @@ function renderChart(){
           ticks:{font:{family:'Inter',size:11},callback:v=>{if(normalize)return v.toFixed(0);const mk=lineMs[0];if(!mk)return v;if(mk==='g')return fGMV(v);return fMetric(mk,v);}},
           title:{display:!!leftLabel,text:leftLabel,font:{family:'Inter',size:11},color:'#666'}},
         yRight:{type:'linear',position:'right',display:showRight,grid:{drawOnChartArea:false},
-          ticks:{font:{family:'Inter',size:11},callback:v=>v!=null?fMetric('n',v):''},
-          title:{display:showRight,text:'Net Rate %',font:{family:'Inter',size:11},color:'#666'}}
+          ticks:{font:{family:'Inter',size:11},callback:v=>v!=null?fPct(v):''},
+          title:{display:showRight,text:rightLabel,font:{family:'Inter',size:11},color:'#666'}}
       }
     }
   });
@@ -1528,6 +1611,199 @@ function renderPricing(){
   makeChart('pc-we', uberWe,'Uber',UBER_COLOR, cabWe,'Cabify',CAB_COLOR);
 }
 
+// ── BUDGETING ─────────────────────────────────────────────────────────
+let bdgType   = 'annual';
+const bdgCharts = {};   // {canvasId: Chart instance}
+const BUDGET_MONTHS  = ['2026-01','2026-02','2026-03','2026-04','2026-05','2026-06',
+                         '2026-07','2026-08','2026-09','2026-10','2026-11','2026-12'];
+const BUDGET_MLABELS = ['Jan','Feb','Mar','Apr','May','Jun',
+                         'Jul','Aug','Sep','Oct','Nov','Dec'];
+
+function setBudgetType(type){
+  bdgType = type;
+  document.getElementById('bdg-annual-btn').classList.toggle('active', type==='annual');
+  document.getElementById('bdg-monthly-btn').classList.toggle('active', type==='monthly');
+  renderBudget();
+}
+
+function buildActualMonthly(city){
+  // Returns {'YYYY-MM': {g, f, asp, nr}} — nr = Net Rate in EUR
+  const mo = {};
+  DATA.forEach(r => {
+    if(r.c !== city) return;
+    const mk = r.d.slice(0,7);
+    if(!mo[mk]) mo[mk] = {g:0, f:0, ns:0, nw:0};
+    const m = mo[mk];
+    m.g += r.g||0;
+    m.f += r.f||0;
+    if(r.n!=null && r.g>0){ m.ns += r.n*r.g; m.nw += r.g; }
+  });
+  Object.values(mo).forEach(m => {
+    m.asp = m.f > 0 ? m.g / m.f : null;
+    m.nr  = m.ns / 100;   // Net Rate EUR = sum(n% * GMV) / 100
+  });
+  return mo;
+}
+
+function initBudget(){
+  const sel = document.getElementById('bdg-city');
+  sel.innerHTML = ALL_CITIES.map(c=>`<option value="${c}">${c}</option>`).join('');
+  // Default to first currently selected city
+  const firstSel = S.cities.find(c => ALL_CITIES.includes(c));
+  if(firstSel) sel.value = firstSel;
+  renderBudget();
+}
+
+function renderBudget(){
+  const city = document.getElementById('bdg-city').value;
+  if(!city) return;
+
+  const bdict = (BUDGET_DATA[bdgType]||{})[city] || {};
+  const adict = buildActualMonthly(city);
+
+  // Arrays aligned to BUDGET_MONTHS
+  const bdgGMV    = BUDGET_MONTHS.map(m => (bdict[m]?.gmv    ?? 0));
+  const bdgOrders = BUDGET_MONTHS.map(m => (bdict[m]?.orders ?? 0));
+  const bdgASP    = BUDGET_MONTHS.map(m => (bdict[m]?.asp    ?? null));
+  const bdgNR     = BUDGET_MONTHS.map(m => (bdict[m]?.net_rate ?? 0));
+
+  // Only show actual for months that have data (g > 0 or f > 0)
+  const actGMV    = BUDGET_MONTHS.map(m => { const a=adict[m]; return (a&&a.g>0)?a.g:null; });
+  const actOrders = BUDGET_MONTHS.map(m => { const a=adict[m]; return (a&&a.f>0)?a.f:null; });
+  const actASP    = BUDGET_MONTHS.map(m => { const a=adict[m]; return (a&&a.f>0)?a.asp:null; });
+  const actNR     = BUDGET_MONTHS.map(m => { const a=adict[m]; return (a&&a.f>0)?a.nr:null; });
+
+  // ── YTD calculations (Jan → last month with actual data) ───────────────────
+  const lastIdx = actGMV.reduce((last,v,i) => (v!=null ? i : last), -1);
+
+  const ytdActGMV = actGMV.slice(0,lastIdx+1).reduce((s,v)=>s+(v||0),0);
+  const ytdActOrd = actOrders.slice(0,lastIdx+1).reduce((s,v)=>s+(v||0),0);
+  const ytdActNR  = actNR.slice(0,lastIdx+1).reduce((s,v)=>s+(v||0),0);
+  const ytdActASP = ytdActOrd > 0 ? ytdActGMV / ytdActOrd : null;
+
+  const ytdBdgGMV = bdgGMV.slice(0,lastIdx+1).reduce((s,v)=>s+v,0);
+  const ytdBdgOrd = bdgOrders.slice(0,lastIdx+1).reduce((s,v)=>s+v,0);
+  const ytdBdgNR  = bdgNR.slice(0,lastIdx+1).reduce((s,v)=>s+v,0);
+  const ytdBdgASP = ytdBdgOrd > 0 ? ytdBdgGMV / ytdBdgOrd : null;
+
+  // Period note
+  if(lastIdx >= 0){
+    const periodEnd = BUDGET_MLABELS[lastIdx] + ' ' + BUDGET_MONTHS[lastIdx].slice(0,4);
+    document.getElementById('bdg-period-note').textContent = `YTD through ${periodEnd}`;
+  } else {
+    document.getElementById('bdg-period-note').textContent = 'No actual data available yet for 2026';
+  }
+
+  // ── KPI Cards ──────────────────────────────────────────────────────────────
+  const kpiCfg = [
+    {label:'GMV',            act:ytdActGMV, bdg:ytdBdgGMV, fmt:v=>fGMV(v)},
+    {label:'Finished Orders',act:ytdActOrd, bdg:ytdBdgOrd, fmt:v=>fNum(v)},
+    {label:'ASP',            act:ytdActASP, bdg:ytdBdgASP, fmt:v=>fEur(v)},
+    {label:'Net Rate',       act:ytdActNR,  bdg:ytdBdgNR,  fmt:v=>fGMV(v)},
+  ];
+
+  document.getElementById('bdg-kpis').innerHTML = kpiCfg.map(k => {
+    const pct    = (k.bdg && k.bdg !== 0) ? k.act / k.bdg * 100 : null;
+    const pctStr = pct != null ? pct.toFixed(1)+'%' : '—';
+    const pctCls = pct == null ? 'nil' : (pct >= 100 ? 'pos' : 'neg');
+    const arrow  = pct == null ? '' : (pct >= 100 ? '▲ ' : '▼ ');
+    const actStr = k.act != null ? k.fmt(k.act) : '—';
+    const bdgStr = k.bdg != null ? k.fmt(k.bdg) : '—';
+    return `<div class="bdg-kpi-card">
+      <div class="bdg-kpi-label">${k.label}</div>
+      <div class="bdg-kpi-actual">${actStr}</div>
+      <div class="bdg-kpi-budget">Budget: ${bdgStr}</div>
+      <div class="bdg-kpi-pct ${pctCls}">${arrow}${pctStr} vs budget</div>
+    </div>`;
+  }).join('');
+
+  // ── Charts ─────────────────────────────────────────────────────────────────
+  const BDG_BG     = 'rgba(42,156,100,0.18)';
+  const BDG_BORDER = 'rgba(42,156,100,0.55)';
+  const ACT_COLOR  = '#2A9C64';
+  const NEG_COLOR  = 'rgba(192,57,43,0.75)';
+
+  // Colour actual bars green/red depending on vs budget
+  function actBarColors(bdgArr, actArr){
+    return actArr.map((v,i) => {
+      if(v == null) return 'transparent';
+      return (v >= bdgArr[i]) ? ACT_COLOR : NEG_COLOR;
+    });
+  }
+
+  function makeBdgChart(canvasId, bdgArr, actArr, fmtFn, attainId){
+    if(bdgCharts[canvasId]){ bdgCharts[canvasId].destroy(); }
+    const ctx = document.getElementById(canvasId)?.getContext('2d');
+    if(!ctx) return;
+    const barColors = actBarColors(bdgArr, actArr);
+
+    // Attainment badge
+    if(attainId && lastIdx >= 0){
+      const sumA = actArr.slice(0,lastIdx+1).reduce((s,v)=>s+(v||0),0);
+      const sumB = bdgArr.slice(0,lastIdx+1).reduce((s,v)=>s+v,0);
+      if(sumB > 0){
+        const pct = sumA/sumB*100;
+        const el  = document.getElementById(attainId);
+        if(el){ el.textContent = pct.toFixed(1)+'% YTD'; el.style.color = pct>=100?'#2A9C64':'#c0392b'; }
+      }
+    }
+
+    bdgCharts[canvasId] = new Chart(ctx, {
+      type:'bar',
+      data:{
+        labels: BUDGET_MLABELS,
+        datasets:[
+          {
+            label:'Budget',
+            data: bdgArr,
+            backgroundColor: BDG_BG,
+            borderColor: BDG_BORDER,
+            borderWidth: 1,
+            borderRadius: 2,
+            order: 2,
+          },
+          {
+            label:'Actual',
+            data: actArr,
+            backgroundColor: barColors,
+            borderColor: barColors.map(c=>c==='transparent'?'transparent':c),
+            borderWidth: 0,
+            borderRadius: 3,
+            order: 1,
+          },
+        ]
+      },
+      options:{
+        responsive:true, maintainAspectRatio:false,
+        interaction:{mode:'index', intersect:false},
+        plugins:{
+          legend:{
+            display:true, position:'top',
+            labels:{boxWidth:12, font:{family:'Inter', size:11}, color:'#555'}
+          },
+          tooltip:{
+            callbacks:{
+              label: ctx => `${ctx.dataset.label}: ${fmtFn(ctx.raw)}`
+            }
+          }
+        },
+        scales:{
+          x:{grid:{display:false}, ticks:{font:{family:'Inter',size:11}}},
+          y:{
+            grid:{color:'rgba(0,0,0,0.05)'},
+            ticks:{font:{family:'Inter',size:11}, callback: v => fmtFn(v)}
+          }
+        }
+      }
+    });
+  }
+
+  makeBdgChart('bdg-chart-gmv',    bdgGMV,    actGMV,    v=>v==null?'—':fGMV(v),  'bdg-att-gmv');
+  makeBdgChart('bdg-chart-orders', bdgOrders, actOrders, v=>v==null?'—':fNum(v),   'bdg-att-orders');
+  makeBdgChart('bdg-chart-asp',    bdgASP,    actASP,    v=>v==null?'—':fEur(v),   'bdg-att-asp');
+  makeBdgChart('bdg-chart-nr',     bdgNR,     actNR,     v=>v==null?'—':fGMV(v),   'bdg-att-nr');
+}
+
 // ── INIT ──────────────────────────────────────────────────────────────
 function renderAll(){
   computeGlobalCityATH();
@@ -1543,6 +1819,7 @@ function renderAll(){
 document.getElementById('nav-badge').textContent='Data up to '+new Date(DATA_MAX+'T00:00:00').toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
 renderAll();
 initPricingCity();
+initBudget();
 </script>
 </body>
 </html>"""
@@ -1554,6 +1831,7 @@ html = (TMPL
     .replace('__EXPANSION__',    expansion_json)
     .replace('__ROS__',          ros_json)
     .replace('__PRICING_DATA__', pricing_json)
+    .replace('__BUDGET_DATA__',  budget_json)
     .replace('__MIN_DATE__',     min_date)
     .replace('__MAX_DATE__',     max_date)
     .replace('__DEFAULT_FROM__', default_from)
