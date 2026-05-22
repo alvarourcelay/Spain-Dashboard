@@ -22,7 +22,7 @@ import csv, os
 
 BUDGET_ANNUAL_CSV = os.environ.get(
     'BUDGET_ANNUAL_CSV',
-    '/sessions/busy-eager-einstein/mnt/uploads/Untitled spreadsheet - Sheet1 (3).csv'
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), 'budget_annual.csv')
 )
 
 _MONTH_MAP = {
