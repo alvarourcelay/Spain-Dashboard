@@ -1644,21 +1644,88 @@ function setBudgetType(type){
   renderBudget();
 }
 
-// Aggregate actual data monthly across the given cities array
+// ── Day-of-week seasonality helpers ──────────────────────────────────────────
+// Returns [Mon..Sun] fractional weights built from historical data for the cities.
+// Excludes data from the last (partial) month so current-month bias doesn't skew weights.
+function buildDowWeights(cities){
+  const dow = [0,0,0,0,0,0,0];  // Mon=0 … Sun=6
+  // Determine last month key in the dataset to exclude it
+  const allMonths = [...new Set(DATA.map(r=>r.d.slice(0,7)))].sort();
+  const lastMo = allMonths[allMonths.length-1];
+  DATA.forEach(r => {
+    if(!cities.includes(r.c)) return;
+    if(r.d.slice(0,7) === lastMo) return;  // skip current/last partial month
+    const d = new Date(r.d+'T00:00:00');
+    const weekday = (d.getDay()+6)%7;       // Sun→6, Mon→0
+    dow[weekday] += r.g||0;
+  });
+  const total = dow.reduce((s,v)=>s+v, 0);
+  // Fall back to uniform weights if no historical data available
+  return total > 0 ? dow.map(v=>v/total) : [1/7,1/7,1/7,1/7,1/7,1/7,1/7];
+}
+
+// Returns the fraction of the month's expected volume in days 1..lastDay,
+// using day-of-week weights (matches Bolt's internal seasonality logic).
+function seasonalityFactor(weights, year, month, lastDay){
+  const totalDays = new Date(year, month, 0).getDate();  // month is 1-indexed
+  let sumElapsed = 0, sumTotal = 0;
+  for(let d=1; d<=totalDays; d++){
+    const dow = (new Date(year, month-1, d).getDay()+6)%7;
+    const w = weights[dow];
+    sumTotal += w;
+    if(d <= lastDay) sumElapsed += w;
+  }
+  return sumTotal > 0 ? sumElapsed/sumTotal : lastDay/totalDays;
+}
+
+// Aggregate actual data monthly across the given cities array.
+// For the current (partial) month applies day-of-week seasonality extrapolation.
+// Adds _exp fields: g_exp, f_exp, asp_exp (extrapolated full-month estimates).
+// For Net Rate, _exp uses the MTD rate directly (ratio, not a volume — same as Bolt Excel).
 function buildActualMonthly(cities){
   const mo = {};
   DATA.forEach(r => {
     if(!cities.includes(r.c)) return;
     const mk = r.d.slice(0,7);
-    if(!mo[mk]) mo[mk] = {g:0, f:0, ns:0, nw:0};
+    if(!mo[mk]) mo[mk] = {g:0, f:0, ns:0, nw:0, maxDay:0};
     const m = mo[mk];
     m.g += r.g||0;
     m.f += r.f||0;
     if(r.n!=null && r.g>0){ m.ns += r.n*r.g; m.nw += r.g; }
+    const day = parseInt(r.d.slice(8,10));
+    if(day > m.maxDay) m.maxDay = day;
   });
-  Object.values(mo).forEach(m => {
-    m.asp  = m.f  > 0 ? m.g / m.f  : null;
-    m.nr   = m.nw > 0 ? m.ns / m.nw : null;  // Net Rate % (weighted avg of daily n%)
+
+  // Identify the last month key present in our data
+  const allMo = Object.keys(mo).sort();
+  const lastMoKey = allMo[allMo.length-1];
+
+  // Build DOW weights once (excluding partial last month)
+  const dowWeights = buildDowWeights(cities);
+
+  Object.entries(mo).forEach(([mk, m]) => {
+    const [yr, mn] = mk.split('-').map(Number);
+    const totalDays = new Date(yr, mn, 0).getDate();
+    const isPartial = mk === lastMoKey && m.maxDay < totalDays - 3;
+
+    m.asp = m.f  > 0 ? m.g / m.f  : null;
+    m.nr  = m.nw > 0 ? m.ns / m.nw : null;  // MTD net rate % — used directly, no extrapolation
+
+    if(isPartial){
+      const factor = seasonalityFactor(dowWeights, yr, mn, m.maxDay);
+      m.g_exp   = factor > 0 ? m.g / factor : m.g;
+      m.f_exp   = factor > 0 ? m.f / factor : m.f;
+      m.asp_exp = m.f_exp > 0 ? m.g_exp / m.f_exp : null;
+      m.extrapolated = true;
+      m.factor   = factor;
+      m.daysElapsed = m.maxDay;
+      m.totalDays   = totalDays;
+    } else {
+      m.g_exp   = m.g;
+      m.f_exp   = m.f;
+      m.asp_exp = m.asp;
+      m.extrapolated = false;
+    }
   });
   return mo;
 }
@@ -1691,10 +1758,14 @@ function renderBudget(){
   // Actual data aggregated across selected cities
   const adict = buildActualMonthly(cities);
 
-  const actGMV    = BUDGET_MONTHS.map(m => { const a=adict[m]; return (a&&a.g >0)?a.g  :null; });
-  const actOrders = BUDGET_MONTHS.map(m => { const a=adict[m]; return (a&&a.f >0)?a.f  :null; });
-  const actASP    = BUDGET_MONTHS.map(m => { const a=adict[m]; return (a&&a.f >0)?a.asp :null; });
-  const actNRPct  = BUDGET_MONTHS.map(m => { const a=adict[m]; return (a&&a.f >0)?a.nr  :null; });
+  // Use extrapolated (_exp) values — for completed months these equal the actual totals;
+  // for the current partial month they are seasonality-adjusted full-month projections.
+  const actGMV    = BUDGET_MONTHS.map(m => { const a=adict[m]; return (a&&a.g >0)?a.g_exp  :null; });
+  const actOrders = BUDGET_MONTHS.map(m => { const a=adict[m]; return (a&&a.f >0)?a.f_exp  :null; });
+  const actASP    = BUDGET_MONTHS.map(m => { const a=adict[m]; return (a&&a.f >0)?a.asp_exp:null; });
+  const actNRPct  = BUDGET_MONTHS.map(m => { const a=adict[m]; return (a&&a.f >0)?a.nr     :null; });
+  // Flag the current month as extrapolated (for KPI card label)
+  const isExtrapolated = BUDGET_MONTHS.map(m => !!(adict[m]?.extrapolated));
 
   // ── YTD (Jan → last month with actual) ────────────────────────────────────
   const lastIdx = actGMV.reduce((last,v,i)=>(v!=null?i:last), -1);
@@ -1716,32 +1787,39 @@ function renderBudget(){
 
   // Period note
   const note = document.getElementById('bdg-period-note');
+  const curIsExp = lastIdx >= 0 && isExtrapolated[lastIdx];
+  const curData  = lastIdx >= 0 ? adict[BUDGET_MONTHS[lastIdx]] : null;
+  const expLabel = curIsExp && curData
+    ? ` · extrapolated from ${curData.daysElapsed}/${curData.totalDays} days`
+    : '';
   if(note) note.textContent = lastIdx>=0
-    ? `KPIs: ${BUDGET_MLABELS[lastIdx]} ${BUDGET_MONTHS[lastIdx].slice(0,4)}`
+    ? `${BUDGET_MLABELS[lastIdx]} ${BUDGET_MONTHS[lastIdx].slice(0,4)}${expLabel}`
     : 'No 2026 actual data yet';
 
   // ── KPI Cards — current month (lastIdx) ───────────────────────────────────
-  // ASP for current month: actGMV[lastIdx]/actOrders[lastIdx]
-  const curActASP  = (actOrders[lastIdx]>0) ? actGMV[lastIdx]/actOrders[lastIdx] : null;
-  const curBdgASP  = bdgASP[lastIdx];
+  const curActASP   = (actOrders[lastIdx]>0) ? actGMV[lastIdx]/actOrders[lastIdx] : null;
+  const curBdgASP   = bdgASP[lastIdx];
   const curActNRPct = actNRPct[lastIdx];
   const curBdgNRPct = bdgNRPct[lastIdx];
 
   const kpiCfg = [
-    {label:'GMV',            act:actGMV[lastIdx],    bdg:bdgGMV[lastIdx],    fmt:v=>fGMV(v),  isNR:false},
-    {label:'Finished Orders',act:actOrders[lastIdx], bdg:bdgOrders[lastIdx], fmt:v=>fNum(v),  isNR:false},
-    {label:'ASP',            act:curActASP,           bdg:curBdgASP,           fmt:v=>fEur(v),  isNR:false},
-    {label:'Net Rate %',     act:curActNRPct,         bdg:curBdgNRPct,         fmt:v=>fPct(v),  isNR:true },
+    {label:'GMV',            act:actGMV[lastIdx],    bdg:bdgGMV[lastIdx],    fmt:v=>fGMV(v), isNR:false},
+    {label:'Finished Orders',act:actOrders[lastIdx], bdg:bdgOrders[lastIdx], fmt:v=>fNum(v), isNR:false},
+    {label:'ASP',            act:curActASP,           bdg:curBdgASP,          fmt:v=>fEur(v), isNR:false},
+    {label:'Net Rate %',     act:curActNRPct,         bdg:curBdgNRPct,        fmt:v=>fPct(v), isNR:true },
   ];
 
   document.getElementById('bdg-kpis').innerHTML = kpiCfg.map(k => {
-    const diff   = k.isNR ? overUnderNR(k.act, k.bdg) : overUnder(k.act, k.bdg);
+    let diff = k.isNR ? overUnderNR(k.act, k.bdg) : overUnder(k.act, k.bdg);
+    // Cap at +100% (same as Bolt Excel — hides extreme outliers)
+    if(!k.isNR && diff != null && diff > 100) diff = null;
     const diffStr = fOvUnd(diff, k.isNR);
     const diffCls = diff == null ? 'nil' : (diff >= 0 ? 'pos' : 'neg');
     const arrow   = diff == null ? '' : (diff >= 0 ? '▲ ' : '▼ ');
+    const expTag  = curIsExp ? '<span style="font-size:10px;color:#888;font-weight:400;margin-left:4px">~proj</span>' : '';
     return `<div class="bdg-kpi-card">
       <div class="bdg-kpi-label">${k.label}</div>
-      <div class="bdg-kpi-actual">${k.act!=null ? k.fmt(k.act) : '—'}</div>
+      <div class="bdg-kpi-actual">${k.act!=null ? k.fmt(k.act) : '—'}${expTag}</div>
       <div class="bdg-kpi-budget">Budget: ${k.bdg!=null ? k.fmt(k.bdg) : '—'}</div>
       <div class="bdg-kpi-pct ${diffCls}">${arrow}${diffStr} vs budget</div>
     </div>`;
@@ -1853,6 +1931,13 @@ function renderBdgTrendChart(ouMap, fmtOU){
 
   const LINE_COLORS = ['#2A9C64','#F5B800','#3B82F6','#F97316'];
 
+  // Zero reference line
+  const zeroLine = {
+    label:'', data: BUDGET_MLABELS.map(()=>0),
+    borderColor:'rgba(0,0,0,0.35)', borderWidth:1.5,
+    borderDash:[5,4], pointRadius:0, fill:false, tension:0, order:99,
+  };
+
   const datasets = bdgTrendMetrics.map((mk, ci) => {
     const arr  = ouMap[mk] || [];
     const isNR = mk==='nr';
@@ -1878,7 +1963,7 @@ function renderBdgTrendChart(ouMap, fmtOU){
 
   bdgCharts['bdg-trend-chart'] = new Chart(ctx, {
     type:'line',
-    data:{ labels:BUDGET_MLABELS, datasets },
+    data:{ labels:BUDGET_MLABELS, datasets:[zeroLine, ...datasets] },
     options:{
       responsive:true, maintainAspectRatio:false,
       interaction:{mode:'index', intersect:false},
@@ -1886,12 +1971,16 @@ function renderBdgTrendChart(ouMap, fmtOU){
         legend:{
           display: datasets.length > 1,
           position:'top',
-          labels:{boxWidth:12, font:{family:'Inter',size:11}}
+          labels:{
+            boxWidth:12, font:{family:'Inter',size:11},
+            filter: item => item.text !== ''   // hide zero-line from legend
+          }
         },
         tooltip:{
           callbacks:{
             label: ctx => {
-              const mk = bdgTrendMetrics[ctx.datasetIndex];
+              if(ctx.dataset.label === '') return null;  // skip zero-line in tooltip
+              const mk = bdgTrendMetrics[ctx.datasetIndex - 1]; // offset by zeroLine
               return ` ${ctx.dataset.label}: ${fmtOU[mk]?.(ctx.raw) ?? '—'}`;
             }
           }
