@@ -1620,7 +1620,7 @@ function renderPricing(){
 
 // ── BUDGETING ─────────────────────────────────────────────────────────
 let bdgType        = 'annual';
-let bdgTrendMetric = 'gmv';   // active metric in trend chart
+let bdgTrendMetrics = ['gmv'];  // active metrics in trend chart (multi-select)
 const bdgCharts    = {};
 const BUDGET_MONTHS  = ['2026-01','2026-02','2026-03','2026-04','2026-05','2026-06',
                          '2026-07','2026-08','2026-09','2026-10','2026-11','2026-12'];
@@ -1637,7 +1637,8 @@ function setBudgetType(type){
   bdgType = type;
   document.getElementById('bdg-annual-btn').classList.toggle('active', type==='annual');
   document.getElementById('bdg-monthly-btn').classList.toggle('active', type==='monthly');
-  // Reset trend pills so they reinitialise with new budget type
+  // Reset trend pills and selection so they reinitialise with new budget type
+  bdgTrendMetrics = ['gmv'];
   const tp = document.getElementById('bdg-trend-pills');
   if(tp) delete tp.dataset.init;
   renderBudget();
@@ -1663,9 +1664,8 @@ function buildActualMonthly(cities){
 }
 
 // over/underperformance: (actual/budget − 1) × 100, with special handling for NR%
-function overUnder(act, bdg){ return (bdg && bdg !== 0) ? (act/bdg - 1)*100 : null; }
-// For NR% use absolute pp difference instead of relative
-function overUnderNR(act, bdg){ return (act != null && bdg != null) ? act - bdg : null; }
+function overUnder(act, bdg){ return (act!=null && bdg && bdg!==0) ? (act/bdg-1)*100 : null; }
+function overUnderNR(act, bdg){ return (act!=null && bdg!=null) ? act-bdg : null; }
 
 function fOvUnd(v, isNR){
   if(v == null) return '—';
@@ -1717,15 +1717,21 @@ function renderBudget(){
   // Period note
   const note = document.getElementById('bdg-period-note');
   if(note) note.textContent = lastIdx>=0
-    ? `YTD through ${BUDGET_MLABELS[lastIdx]} ${BUDGET_MONTHS[lastIdx].slice(0,4)}`
+    ? `KPIs: ${BUDGET_MLABELS[lastIdx]} ${BUDGET_MONTHS[lastIdx].slice(0,4)}`
     : 'No 2026 actual data yet';
 
-  // ── KPI Cards ──────────────────────────────────────────────────────────────
+  // ── KPI Cards — current month (lastIdx) ───────────────────────────────────
+  // ASP for current month: actGMV[lastIdx]/actOrders[lastIdx]
+  const curActASP  = (actOrders[lastIdx]>0) ? actGMV[lastIdx]/actOrders[lastIdx] : null;
+  const curBdgASP  = bdgASP[lastIdx];
+  const curActNRPct = actNRPct[lastIdx];
+  const curBdgNRPct = bdgNRPct[lastIdx];
+
   const kpiCfg = [
-    {label:'GMV',            act:ytdActGMV,   bdg:ytdBdgGMV,   fmt:v=>fGMV(v),  isNR:false},
-    {label:'Finished Orders',act:ytdActOrd,   bdg:ytdBdgOrd,   fmt:v=>fNum(v),  isNR:false},
-    {label:'ASP',            act:ytdActASP,   bdg:ytdBdgASP,   fmt:v=>fEur(v),  isNR:false},
-    {label:'Net Rate %',     act:ytdActNRPct, bdg:ytdBdgNRPct, fmt:v=>fPct(v),  isNR:true },
+    {label:'GMV',            act:actGMV[lastIdx],    bdg:bdgGMV[lastIdx],    fmt:v=>fGMV(v),  isNR:false},
+    {label:'Finished Orders',act:actOrders[lastIdx], bdg:bdgOrders[lastIdx], fmt:v=>fNum(v),  isNR:false},
+    {label:'ASP',            act:curActASP,           bdg:curBdgASP,           fmt:v=>fEur(v),  isNR:false},
+    {label:'Net Rate %',     act:curActNRPct,         bdg:curBdgNRPct,         fmt:v=>fPct(v),  isNR:true },
   ];
 
   document.getElementById('bdg-kpis').innerHTML = kpiCfg.map(k => {
@@ -1757,17 +1763,16 @@ function renderBudget(){
   };
 
   // ── Trend chart (over/underperformance by month) ───────────────────────────
-  // Render metric pills
+  // Render metric pills (multi-select, re-init on budget type change)
   const tpills = document.getElementById('bdg-trend-pills');
   if(tpills && !tpills.dataset.init){
     tpills.dataset.init = '1';
     tpills.innerHTML = BDG_METRICS.map(m =>
-      `<button class="mcheck${m.k===bdgTrendMetric?' active':''}" data-bm="${m.k}"
-         onclick="bdgTrendMetric=this.dataset.bm;document.querySelectorAll('#bdg-trend-pills .mcheck').forEach(b=>b.classList.remove('active'));this.classList.add('active');renderBdgTrendChart(window._bdgOU,window._bdgFmtOU)">
+      `<button class="mcheck${bdgTrendMetrics.includes(m.k)?' active':''}" data-bm="${m.k}"
+         onclick="const k=this.dataset.bm;const i=bdgTrendMetrics.indexOf(k);if(i>=0&&bdgTrendMetrics.length>1)bdgTrendMetrics.splice(i,1);else if(i<0)bdgTrendMetrics.push(k);this.classList.toggle('active',bdgTrendMetrics.includes(k));renderBdgTrendChart(window._bdgOU,window._bdgFmtOU)">
          <span class="mcheck-tick">✓</span> ${m.label}</button>`
     ).join('');
   }
-  // Store for pill callbacks
   window._bdgOU    = ouMap;
   window._bdgFmtOU = fmtOU;
   renderBdgTrendChart(ouMap, fmtOU);
@@ -1842,35 +1847,64 @@ function renderBudget(){
 }
 
 function renderBdgTrendChart(ouMap, fmtOU){
-  const mk  = bdgTrendMetric;
-  const arr = ouMap[mk] || [];
-  const isNR = mk === 'nr';
   if(bdgCharts['bdg-trend-chart']){ bdgCharts['bdg-trend-chart'].destroy(); }
   const ctx = document.getElementById('bdg-trend-chart')?.getContext('2d');
   if(!ctx) return;
+
+  const LINE_COLORS = ['#2A9C64','#F5B800','#3B82F6','#F97316'];
+
+  const datasets = bdgTrendMetrics.map((mk, ci) => {
+    const arr  = ouMap[mk] || [];
+    const isNR = mk==='nr';
+    const meta = BDG_METRICS.find(m=>m.k===mk);
+    const col  = LINE_COLORS[ci % LINE_COLORS.length];
+    // Null out months with no actual data so the line doesn't connect through them
+    const data = arr.map(v => v!=null ? v : null);
+    return {
+      label: meta?.label + (isNR?' (pp)':' (%)'),
+      data,
+      borderColor: col,
+      backgroundColor: col,
+      borderWidth: 2,
+      pointRadius: 4,
+      pointHoverRadius: 6,
+      tension: 0.3,
+      spanGaps: false,   // don't connect across null gaps
+    };
+  });
+
+  // Determine if any selected metric is NR (for Y-axis label hint)
+  const hasNR = bdgTrendMetrics.includes('nr');
+
   bdgCharts['bdg-trend-chart'] = new Chart(ctx, {
-    type:'bar',
-    data:{
-      labels:BUDGET_MLABELS,
-      datasets:[{
-        label: BDG_METRICS.find(m=>m.k===mk)?.label + (isNR?' (pp diff)':' (% vs budget)'),
-        data: arr,
-        backgroundColor: arr.map(v => v==null?'transparent':v>=0?'rgba(42,156,100,0.75)':'rgba(192,57,43,0.65)'),
-        borderColor:      arr.map(v => v==null?'transparent':v>=0?'#2A9C64':'#c0392b'),
-        borderWidth:0, borderRadius:3,
-      }]
-    },
+    type:'line',
+    data:{ labels:BUDGET_MLABELS, datasets },
     options:{
       responsive:true, maintainAspectRatio:false,
+      interaction:{mode:'index', intersect:false},
       plugins:{
-        legend:{display:false},
-        tooltip:{callbacks:{label:ctx=>fmtOU[mk](ctx.raw)}}
+        legend:{
+          display: datasets.length > 1,
+          position:'top',
+          labels:{boxWidth:12, font:{family:'Inter',size:11}}
+        },
+        tooltip:{
+          callbacks:{
+            label: ctx => {
+              const mk = bdgTrendMetrics[ctx.datasetIndex];
+              return ` ${ctx.dataset.label}: ${fmtOU[mk]?.(ctx.raw) ?? '—'}`;
+            }
+          }
+        }
       },
       scales:{
-        x:{grid:{display:false},ticks:{font:{family:'Inter',size:11}}},
+        x:{grid:{display:false}, ticks:{font:{family:'Inter',size:11}}},
         y:{
           grid:{color:'rgba(0,0,0,0.05)'},
-          ticks:{font:{family:'Inter',size:11},callback:v=>(v>=0?'+':'')+v.toFixed(isNR?2:1)+(isNR?' pp':'%')},
+          ticks:{
+            font:{family:'Inter',size:11},
+            callback: v => (v>=0?'+':'')+v.toFixed(1)+'%'
+          }
         }
       }
     }
