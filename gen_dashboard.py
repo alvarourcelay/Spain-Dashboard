@@ -764,7 +764,7 @@ function aggregate(rows){
       orders:0,paid:0,eoh:0,nra:0,
       eph_s:0,rph_s:0,util_s:0,hpad_s:0,eph_b_s:0,paid_util_s:0,eutil_s:0,
       sc_s:0,s2f_s:0,s2o_s:0,o2f_s:0,oot_s:0,
-      arp_s:0,dist_s:0,ppk_s:0,surge_s:0,ata_s:0,oar_s:0,par_s:0,rpr_s:0,
+      arp_s:0,dist_s:0,ppk_s:0,surge_s:0,ata_s:0,oar_s:0,oar_w:0,par_s:0,par_w:0,rpr_s:0,
       dspend_s:0,dspend_w:0,sspend_s:0,sspend_w:0,bspend_s:0,bspend_w:0,
       dcc_s:0,dcc_w:0,sspend_ex_s:0,sspend_ex_w:0,
       oot_gs_s:0,oot_gs_w:0,ar_in_s:0,ar_in_w:0,ar_out_s:0,ar_out_w:0});
@@ -782,10 +782,14 @@ function aggregate(rows){
              if(r.o2f!=null)a.o2f_s+=r.o2f*ss;if(r.oot!=null)a.oot_s+=r.oot*ss;}
     if(fo>0){if(r.arp!=null)a.arp_s+=r.arp*fo;if(r.dist!=null)a.dist_s+=r.dist*fo;if(r.ppk!=null)a.ppk_s+=r.ppk*fo;
              if(r.surge!=null)a.surge_s+=r.surge*fo;if(r.ata!=null)a.ata_s+=r.ata*fo;
-             if(r.oar!=null)a.oar_s+=r.oar*fo;if(r.par!=null)a.par_s+=r.par*fo;if(r.rpr!=null)a.rpr_s+=r.rpr*fo;
+             if(r.rpr!=null)a.rpr_s+=r.rpr*fo;
              if(r.oot_gs!=null){a.oot_gs_s+=r.oot_gs*fo;a.oot_gs_w+=fo;}
              if(r.ar_in!=null) {a.ar_in_s +=r.ar_in *fo;a.ar_in_w +=fo;}
              if(r.ar_out!=null){a.ar_out_s+=r.ar_out*fo;a.ar_out_w+=fo;}}
+    // OAR/PAR: weight by total orders dispatched (not finished orders)
+    const ord=r.orders||fo;
+    if(ord>0){if(r.oar!=null){a.oar_s+=r.oar*ord;a.oar_w+=ord;}
+              if(r.par!=null){a.par_s+=r.par*ord;a.par_w+=ord;}}
     if(gv>0){if(r.dspend!=null){a.dspend_s+=r.dspend*gv;a.dspend_w+=gv;}
              if(r.sspend!=null){a.sspend_s+=r.sspend*gv;a.sspend_w+=gv;}
              if(r.bspend!=null){a.bspend_s+=r.bspend*gv;a.bspend_w+=gv;}
@@ -807,7 +811,7 @@ function accVal(a,k){
     o2f:a.sess>0?a.o2f_s/a.sess:null,oot:a.sess>0?a.oot_s/a.sess:null,
     arp:a.f>0?a.arp_s/a.f:null,dist:a.f>0?a.dist_s/a.f:null,ppk:a.f>0?a.ppk_s/a.f:null,
     surge:a.f>0?a.surge_s/a.f:null,ata:a.f>0?a.ata_s/a.f:null,
-    oar:a.f>0?a.oar_s/a.f:null,par:a.f>0?a.par_s/a.f:null,rpr:a.f>0?a.rpr_s/a.f:null,
+    oar:a.oar_w>0?a.oar_s/a.oar_w:null,par:a.par_w>0?a.par_s/a.par_w:null,rpr:a.f>0?a.rpr_s/a.f:null,
     dspend:a.dspend_w>0?a.dspend_s/a.dspend_w:null,sspend:a.sspend_w>0?a.sspend_s/a.sspend_w:null,
     bspend:a.bspend_w>0?a.bspend_s/a.bspend_w:null,dcc:a.dcc_w>0?a.dcc_s/a.dcc_w:null,
     sspend_ex:a.sspend_ex_w>0?a.sspend_ex_s/a.sspend_ex_w:null,
@@ -824,7 +828,7 @@ function aggSum(byP,k){
       orders:0,paid:0,eoh:0,nra:0,
       eph_s:0,rph_s:0,util_s:0,hpad_s:0,eph_b_s:0,paid_util_s:0,eutil_s:0,
       sc_s:0,s2f_s:0,s2o_s:0,o2f_s:0,oot_s:0,
-      arp_s:0,dist_s:0,ppk_s:0,surge_s:0,ata_s:0,oar_s:0,par_s:0,rpr_s:0,
+      arp_s:0,dist_s:0,ppk_s:0,surge_s:0,ata_s:0,oar_s:0,oar_w:0,par_s:0,par_w:0,rpr_s:0,
       dspend_s:0,dspend_w:0,sspend_s:0,sspend_w:0,bspend_s:0,bspend_w:0,
       dcc_s:0,dcc_w:0,sspend_ex_s:0,sspend_ex_w:0,
       oot_gs_s:0,oot_gs_w:0,ar_in_s:0,ar_in_w:0,ar_out_s:0,ar_out_w:0};
@@ -855,7 +859,7 @@ function secTotals(byP){
   const st={f:0,g:0,ns:0,nw:0,o:0,ap:0,pa:0,ar:0,sess:0,orders:0,paid:0,eoh:0,nra:0,
     eph_s:0,rph_s:0,util_s:0,hpad_s:0,eph_b_s:0,paid_util_s:0,eutil_s:0,
     sc_s:0,s2f_s:0,s2o_s:0,o2f_s:0,oot_s:0,
-    arp_s:0,dist_s:0,ppk_s:0,surge_s:0,ata_s:0,oar_s:0,par_s:0,rpr_s:0,
+    arp_s:0,dist_s:0,ppk_s:0,surge_s:0,ata_s:0,oar_s:0,oar_w:0,par_s:0,par_w:0,rpr_s:0,
     dspend_s:0,dspend_w:0,sspend_s:0,sspend_w:0,bspend_s:0,bspend_w:0,
     dcc_s:0,dcc_w:0,sspend_ex_s:0,sspend_ex_w:0,
     oot_gs_s:0,oot_gs_w:0,ar_in_s:0,ar_in_w:0,ar_out_s:0,ar_out_w:0};
@@ -1330,7 +1334,7 @@ function buildMerged(cm){
     orders:0,paid:0,eoh:0,nra:0,
     eph_s:0,rph_s:0,util_s:0,hpad_s:0,eph_b_s:0,paid_util_s:0,eutil_s:0,
     sc_s:0,s2f_s:0,s2o_s:0,o2f_s:0,oot_s:0,
-    arp_s:0,dist_s:0,ppk_s:0,surge_s:0,ata_s:0,oar_s:0,par_s:0,rpr_s:0,
+    arp_s:0,dist_s:0,ppk_s:0,surge_s:0,ata_s:0,oar_s:0,oar_w:0,par_s:0,par_w:0,rpr_s:0,
     dspend_s:0,dspend_w:0,sspend_s:0,sspend_w:0,bspend_s:0,bspend_w:0,
     dcc_s:0,dcc_w:0,sspend_ex_s:0,sspend_ex_w:0,
     oot_gs_s:0,oot_gs_w:0,ar_in_s:0,ar_in_w:0,ar_out_s:0,ar_out_w:0};
@@ -1700,8 +1704,11 @@ function buildActualMonthly(cities){
   const allMo = Object.keys(mo).sort();
   const lastMoKey = allMo[allMo.length-1];
 
-  // Build DOW weights once (excluding partial last month)
-  const dowWeights = buildDowWeights(cities);
+  // Build DOW weights from ALL cities (national average).
+  // Matches Bolt Excel logic: Non-LTO cities use the country average seasonality factor;
+  // LTO cities (Madrid, Málaga, Barcelona) use city-specific factors but the national avg
+  // is within ~0.5 pp of those — far closer than computing per-city from selected cities alone.
+  const dowWeights = buildDowWeights(ALL_CITIES);
 
   Object.entries(mo).forEach(([mk, m]) => {
     const [yr, mn] = mk.split('-').map(Number);
