@@ -147,7 +147,12 @@ def load_data():
         ppk  = (g / dist_km)             if dist_km else None
         surge= (surge_sum / f)           if f and surge_sum is not None else None
         ata  = (ata_sum / f)             if f and ata_sum  is not None else None
-        oar  = (tries_acc / tries_tot * 100) if tries_tot and tries_acc is not None else None
+        # OAR: % of orders placed by riders that got a driver to accept
+        #      = accepted dispatches / orders placed (≈ 80-85%)
+        oar  = (tries_acc / orders * 100)   if orders  and tries_acc is not None else None
+        # PAR: % of individual driver dispatches that are accepted
+        #      = accepted dispatches / total dispatches (≈ 40-45%)
+        par  = (tries_acc / tries_tot * 100) if tries_tot and tries_acc is not None else None
         o2f  = (f / orders * 100)        if orders else None
         oot  = ((tries_tot - (tries_nonopt or 0)) / tries_tot * 100) if tries_tot else None
 
@@ -203,7 +208,7 @@ def load_data():
             'paid': paid, 'paid_util': paid_util,
             'eoh': eoh, 'eutil': eutil,
             'eph_b': None,   # not derivable from mart tables
-            'par': None,     # not derivable from mart tables
+            'par': par,
             'o2f': o2f, 'rpr': rpr,
             'dspend': dspend, 'sspend': sspend,
             'bspend': bspend, 'dcc': dcc, 'sspend_ex': sspend_ex,
