@@ -5,9 +5,10 @@ Data source: Databricks (DATA_SOURCE=databricks) or CSV (default).
 
 import csv, json, os
 from datetime import datetime, timedelta
-from pricing_loader import load_pricing_data
-from quality_loader import load_quality_data
-from budget_loader  import load_budget_data
+from pricing_loader       import load_pricing_data
+from quality_loader       import load_quality_data
+from budget_loader        import load_budget_data
+from market_share_loader  import load_market_share
 
 LAUNCH_DATES = {
     'A Coruña':  '2025-09-24', 'Alicante':  '2026-02-27',
@@ -120,6 +121,10 @@ city_colors = {c: palette[i % len(palette)] for i,c in enumerate(all_cities)}
 print('Loading budget data…')
 budget_raw  = load_budget_data()
 budget_json = json.dumps(budget_raw, separators=(',',':'))
+
+print('Loading market share data…')
+market_share_raw  = load_market_share()
+market_share_json = json.dumps(market_share_raw, separators=(',',':'))
 
 data_json      = json.dumps(data,             separators=(',',':'))
 cities_json    = json.dumps(all_cities,       separators=(',',':'))
@@ -300,6 +305,18 @@ tbody td:first-child{font-weight:600;color:var(--d)}
 .bdg-empty{padding:48px;text-align:center;color:#999;font-style:italic}
 @media(max-width:1000px){.bdg-chart-grid{grid-template-columns:1fr}}
 @media(max-width:700px){.bdg-kpi-grid{grid-template-columns:repeat(2,1fr)}}
+
+/* MARKET SHARE SECTION */
+.ms-controls{display:flex;gap:14px;align-items:flex-end;margin-bottom:14px;flex-wrap:wrap}
+.ms-flabel{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--d);margin-bottom:5px}
+.ms-select{border:1.5px solid var(--border);border-radius:7px;padding:6px 28px 6px 10px;font-family:inherit;font-size:13px;font-weight:500;background:var(--w);cursor:pointer;min-width:140px;color:var(--b)}
+.ms-select:focus{outline:none;border-color:var(--g)}
+.ms-chart-wrap{position:relative;height:220px}
+.ms-legend{display:flex;gap:14px;margin-top:10px;flex-wrap:wrap;font-size:11px;color:var(--t2);align-items:center}
+.ms-legend-item{display:flex;align-items:center;gap:5px}
+.ms-legend-dot{width:10px;height:10px;border-radius:2px;display:inline-block}
+.ms-note{font-size:11px;color:var(--t2);margin-top:6px}
+.ms-empty{padding:32px;text-align:center;color:#999;font-style:italic;font-size:13px}
 </style>
 </head>
 <body>
@@ -397,6 +414,19 @@ tbody td:first-child{font-weight:600;color:var(--d)}
     </div>
   </div>
 
+  <!-- QUALITY -->
+  <div class="sec-section">
+    <div class="sec-hdr">Quality</div>
+    <div class="sec-grid sec-grid-6" id="quality-cards"></div>
+    <div class="sec-chart">
+      <div class="sec-chart-head">
+        <div><div class="sec-chart-title">Trend</div><div class="sec-chart-note" id="quality-note"></div></div>
+        <div class="metric-checks" id="quality-pills"></div>
+      </div>
+      <div class="sec-chart-body"><canvas id="quality-chart"></canvas></div>
+    </div>
+  </div>
+
   <!-- PRICING -->
   <div class="sec-section">
     <div class="sec-hdr">Pricing</div>
@@ -431,17 +461,18 @@ tbody td:first-child{font-weight:600;color:var(--d)}
     <div id="pricing-body"></div>
   </div>
 
-  <!-- QUALITY -->
-  <div class="sec-section">
-    <div class="sec-hdr">Quality</div>
-    <div class="sec-grid sec-grid-6" id="quality-cards"></div>
-    <div class="sec-chart">
-      <div class="sec-chart-head">
-        <div><div class="sec-chart-title">Trend</div><div class="sec-chart-note" id="quality-note"></div></div>
-        <div class="metric-checks" id="quality-pills"></div>
+  <!-- MARKET SHARE -->
+  <div class="sec-section" id="ms-section">
+    <div class="sec-hdr">Market Share</div>
+    <div class="ms-controls">
+      <div>
+        <div class="ms-flabel">CITY</div>
+        <select class="ms-select" id="ms-city" onchange="renderMarketShare()"></select>
       </div>
-      <div class="sec-chart-body"><canvas id="quality-chart"></canvas></div>
     </div>
+    <div class="ms-chart-wrap"><canvas id="ms-chart"></canvas></div>
+    <div class="ms-legend" id="ms-legend"></div>
+    <div class="ms-note">FoxIntelligence · Weekly · Estimated market share by rides</div>
   </div>
 
   <!-- GENERAL DASHBOARD -->
@@ -520,8 +551,9 @@ const ALL_CITIES  = __CITIES__;
 const CITY_COLORS = __COLORS__;
 const EXPANSION   = __EXPANSION__;
 const ROS         = __ROS__;
-const PRICING_DATA  = __PRICING_DATA__;
-const BUDGET_DATA   = __BUDGET_DATA__;
+const PRICING_DATA       = __PRICING_DATA__;
+const BUDGET_DATA        = __BUDGET_DATA__;
+const MARKET_SHARE_DATA  = __MARKET_SHARE_DATA__;
 const DATA_MIN    = '__MIN_DATE__';
 const DATA_MAX    = '__MAX_DATE__';
 
@@ -1622,6 +1654,111 @@ function renderPricing(){
   makeChart('pc-we', uberWe,'Uber',UBER_COLOR, cabWe,'Cabify',CAB_COLOR);
 }
 
+// ── MARKET SHARE ──────────────────────────────────────────────────────
+const MS_COLORS = {
+  'Bolt':    '#a9c574',
+  'Uber':    '#000000',
+  'Cabify':  '#815ab5',
+  'Freenow': '#a3301f',
+  'Heetch':  '#FEE13E',
+};
+const MS_ORDER = ['Uber','Cabify','Bolt','Freenow','Heetch'];
+let msChartInst = null;
+
+function initMsCity(){
+  const sel = document.getElementById('ms-city');
+  if(!sel) return;
+  const cities = Object.keys(MARKET_SHARE_DATA).sort();
+  sel.innerHTML = '';
+  if(!cities.length){ sel.innerHTML='<option>No data</option>'; return; }
+  cities.forEach(c => {
+    const o = document.createElement('option');
+    o.value = c; o.textContent = c;
+    sel.appendChild(o);
+  });
+  // Pre-select city matching current filter if possible
+  const active = S.cities.find(c => cities.includes(c)) || cities[0];
+  sel.value = active;
+}
+
+function renderMarketShare(){
+  const city = document.getElementById('ms-city')?.value;
+  const wrap = document.getElementById('ms-chart');
+  const legEl= document.getElementById('ms-legend');
+  if(!city || !wrap) return;
+
+  const cityData = MARKET_SHARE_DATA[city];
+  if(!cityData || !Object.keys(cityData).length){
+    if(msChartInst){ msChartInst.destroy(); msChartInst=null; }
+    wrap.parentElement.innerHTML = '<div class="ms-empty">No market share data available for '+city+'</div>';
+    return;
+  }
+
+  // Filter weeks within selected date range
+  const allWeeks = Object.keys(cityData).sort();
+  const weeks = allWeeks.filter(w => w >= S.df && w <= S.dt);
+  if(!weeks.length){
+    if(msChartInst){ msChartInst.destroy(); msChartInst=null; }
+    if(legEl) legEl.innerHTML='';
+    return;
+  }
+
+  // Collect all competitors that appear, sorted by MS_ORDER then alphabetically
+  const compSet = new Set();
+  weeks.forEach(w => Object.keys(cityData[w]).forEach(c => compSet.add(c)));
+  const comps = [
+    ...MS_ORDER.filter(c => compSet.has(c)),
+    ...[...compSet].filter(c => !MS_ORDER.includes(c)).sort()
+  ];
+
+  // Labels: "DD Mon" style from week_start date
+  const labels = weeks.map(w => {
+    const d = new Date(w + 'T00:00:00');
+    const dd = String(d.getDate()).padStart(2,'0');
+    const mo = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
+    return dd+' '+mo;
+  });
+
+  const datasets = comps.map(comp => ({
+    label: comp,
+    data: weeks.map(w => cityData[w][comp] ?? 0),
+    backgroundColor: MS_COLORS[comp] || '#999',
+    borderWidth: 0,
+    stack: 'ms',
+  }));
+
+  if(msChartInst){ msChartInst.destroy(); }
+  msChartInst = new Chart(wrap, {
+    type: 'bar',
+    data: { labels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y != null ? ctx.parsed.y.toFixed(1)+'%' : '—'}`
+          }
+        }
+      },
+      scales: {
+        x: { stacked: true, grid: { display: false },
+             ticks: { font: { size: 11 }, color: '#666', maxRotation: 45 } },
+        y: { stacked: true, min: 0, max: 100,
+             ticks: { callback: v => v+'%', font: { size: 11 }, color: '#666' },
+             grid: { color: '#eee' } }
+      }
+    }
+  });
+
+  // Legend
+  if(legEl){
+    legEl.innerHTML = comps.map(c =>
+      `<div class="ms-legend-item"><span class="ms-legend-dot" style="background:${MS_COLORS[c]||'#999'}"></span>${c}</div>`
+    ).join('');
+  }
+}
+
 // ── BUDGETING ─────────────────────────────────────────────────────────
 let bdgType        = 'annual';
 let bdgTrendMetrics = ['gmv'];  // active metrics in trend chart (multi-select)
@@ -2015,6 +2152,7 @@ function renderAll(){
   for(const id of['supply','demand','pricing','quality','general']){renderSecPills(id);renderSecChart(id);}
   renderHistoricalTable();
   renderBudget();
+  renderMarketShare();
   // Hide pricing gap section when YoY mode is active
   const ps=document.getElementById('pricing-section');
   if(ps) ps.style.display=yoyMode?'none':'';
@@ -2023,6 +2161,8 @@ function renderAll(){
 document.getElementById('nav-badge').textContent='Data up to '+new Date(DATA_MAX+'T00:00:00').toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
 renderAll();
 initPricingCity();
+initMsCity();
+renderMarketShare();
 </script>
 </body>
 </html>"""
@@ -2034,8 +2174,9 @@ html = (TMPL
     .replace('__EXPANSION__',    expansion_json)
     .replace('__ROS__',          ros_json)
     .replace('__PRICING_DATA__', pricing_json)
-    .replace('__BUDGET_DATA__',  budget_json)
-    .replace('__MIN_DATE__',     min_date)
+    .replace('__BUDGET_DATA__',        budget_json)
+    .replace('__MARKET_SHARE_DATA__',  market_share_json)
+    .replace('__MIN_DATE__',           min_date)
     .replace('__MAX_DATE__',     max_date)
     .replace('__DEFAULT_FROM__', default_from)
 )
