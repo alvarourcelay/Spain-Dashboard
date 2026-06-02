@@ -36,15 +36,15 @@ COMP_NAMES = {
 
 SQL = """
 SELECT
-  CAST(week_start AS STRING)           AS week_start,
-  city_name,
-  competitor_app,
-  digital_market_share_rides_raw       AS market_share
-FROM hive_metastore.dbt_yaqub_mcreddie_spark.mart_fox_market_weekly_city
-WHERE country_name = 'Spain'
-  AND week_start >= '{start_date}'
-  AND digital_market_share_rides_raw IS NOT NULL
-ORDER BY week_start, city_name, competitor_app
+  week                                 AS week_start,
+  city,
+  merchant,
+  market_share_rides                   AS market_share
+FROM hive_metastore.rides_finance.foxintel_enriched
+WHERE lower(country) = 'spain'
+  AND week >= '{start_date}'
+  AND market_share_rides IS NOT NULL
+ORDER BY week, city, merchant
 """.strip()
 
 
@@ -80,9 +80,9 @@ def load_market_share():
     data = {}
     for row in rows:
         r = dict(zip(cols, row))
-        city  = r['city_name']
+        city  = r['city']
         week  = r['week_start']          # 'YYYY-MM-DD' (Monday)
-        comp  = _normalise_comp(r['competitor_app'])
+        comp  = _normalise_comp(r['merchant'])
         share = r['market_share']
 
         if comp is None or share is None:
