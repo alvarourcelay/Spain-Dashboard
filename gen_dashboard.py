@@ -215,9 +215,9 @@ nav{background:var(--d);padding:0 28px;height:56px;display:flex;align-items:cent
 .mcheck{padding:4px 12px;border-radius:20px;border:1.5px solid var(--border);background:var(--w);color:var(--t2);font-family:inherit;font-size:11px;font-weight:500;cursor:pointer;transition:all .12s;display:flex;align-items:center;gap:4px}
 .mcheck:hover{border-color:var(--g);color:var(--g)}
 .mcheck.active{background:var(--g);border-color:var(--g);color:#fff}
-.mcheck-bar{background:var(--d);border-color:var(--d);color:#fff}
-.mcheck-bar:hover{background:#1c4a31;border-color:#1c4a31;color:#fff}
-.mcheck-bar.active{background:var(--g);border-color:var(--g)}
+.mcheck-bar{background:var(--w);border-color:#aaa;color:var(--t2)}
+.mcheck-bar:hover{border-color:var(--g);color:var(--g)}
+.mcheck-bar.active{background:var(--d);border-color:var(--d);color:#fff}
 .mcheck-tick{font-size:10px;opacity:.7}
 
 /* MAIN CHART */
@@ -252,7 +252,7 @@ tbody td:first-child{font-weight:600;color:var(--d)}
 .hist-tbl thead .sec-hdr-demand{background:#1B4A31;color:#fff}
 .hist-tbl thead .sec-hdr-pricing{background:#2A3F32;color:#fff}
 .hist-tbl thead .sec-hdr-quality{background:#0A3D22;color:#fff}
-.hist-tbl thead .metric-hdr{background:#f7f7f7;color:var(--d);font-size:10px;letter-spacing:.3px;border-top:none;border-right:1px solid var(--border)}
+.hist-tbl thead .metric-hdr{background:#f7f7f7;color:var(--d);font-size:10px;letter-spacing:.3px;border-top:none;border-right:1px solid var(--border);min-width:52px;white-space:nowrap}
 .hist-tbl thead .period-hdr{background:var(--d);color:#fff;text-align:left;border-right:2px solid #2A9C64;min-width:90px}
 .hist-tbl tbody tr:nth-child(odd){background:#FAFAFA}
 .hist-tbl tbody tr:hover{background:#F0FAF4}
@@ -263,9 +263,12 @@ tbody td:first-child{font-weight:600;color:var(--d)}
 .hist-tbl tbody tr:hover td.hist-day,.hist-tbl tbody tr:hover td.hist-period{background:#F0FAF4}
 .hist-tbl tbody tr.hist-prev-hl{background:#E8F5E9!important}
 .hist-tbl tbody tr.hist-prev-hl td.hist-day,.hist-tbl tbody tr.hist-prev-hl td.hist-period{background:#E8F5E9!important}
-.hist-tbl tbody td.hist-val{font-size:12px;color:var(--d);font-weight:500;padding-right:4px;border-right:none}
-.hist-tbl tbody td.hist-chg{font-size:11px;font-weight:600;padding-left:3px;border-right:2px solid #c8d8cc}
+.hist-tbl tbody td.hist-val{font-size:12px;color:var(--d);font-weight:500;padding-right:4px;border-right:none;min-width:52px;white-space:nowrap}
+.hist-tbl tbody td.hist-chg{font-size:11px;font-weight:600;padding-left:3px;border-right:2px solid #c8d8cc;min-width:46px;white-space:nowrap}
 .hist-tbl .chg-pos{color:#2A9C64}.hist-tbl .chg-neg{color:#c0392b}.hist-tbl .chg-nil{color:#aaa}
+.hist-tbl tbody tr.hist-ath{background:#FFFDE7!important;font-weight:600}
+.hist-tbl tbody tr.hist-ath td{border-bottom:2px solid #FFD600;color:#7A6000}
+.hist-tbl tbody tr.hist-ath td.hist-period{color:#7A6000;font-weight:700}
 
 @media(max-width:1200px){.sec-grid-6{grid-template-columns:repeat(3,1fr)}.sec-grid-5{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:1000px){.kpi-row{grid-template-columns:repeat(2,1fr)}}
@@ -1402,8 +1405,21 @@ function renderHistoricalTable(){
     totMap_ly=new Map([...byP_ly.keys()].map(pk=>[pk,buildMerged(byP_ly.get(pk))]));
   }
 
+  // ATH row (all-time high across ALL data, not just filtered range)
+  let athRow='<tr class="hist-ath"><td class="hist-day">⭐</td><td class="hist-period">All-Time High</td>';
+  let _athci=0;
+  for(const sec of HIST_COLS){
+    for(const m of sec.metrics){
+      const v=ATH[m.k];
+      const _acs=_athci%2===0?'':'background:rgba(255,214,0,0.10)';
+      _athci++;
+      athRow+=`<td class="hist-val" style="${_acs}" colspan="2">${fMetricAp(m.k,v)}</td>`;
+    }
+  }
+  athRow+='</tr>';
+
   // Tbody: oldest → newest
-  let tbody='<tbody>';
+  let tbody='<tbody>'+athRow;
   for(let i=0;i<periods.length;i++){
     const pk=periods[i];
     const cur=totMap.get(pk);
