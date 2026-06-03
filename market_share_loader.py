@@ -68,12 +68,17 @@ def load_market_share():
     query = SQL.format(start_date=START_DATE)
     print(f"Querying FoxIntelligence market share from {START_DATE}…")
 
-    with conn.cursor() as cur:
-        cur.execute(query)
-        rows = cur.fetchall()
-        cols = [d[0] for d in cur.description]
+    try:
+        with conn.cursor() as cur:
+            cur.execute(query)
+            rows = cur.fetchall()
+            cols = [d[0] for d in cur.description]
+        conn.close()
+    except Exception as e:
+        conn.close()
+        print(f"  ⚠ Market share data unavailable (permissions pending): {e}")
+        return {}
 
-    conn.close()
     print(f"  → {len(rows)} city-week-competitor rows returned")
 
     # Build nested dict: city → week_start → { competitor: share% }
