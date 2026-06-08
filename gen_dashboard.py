@@ -244,7 +244,7 @@ tbody td:first-child{font-weight:600;color:var(--d)}
 /* HISTORICAL TABLE */
 .hist-card{background:var(--w);border:1px solid var(--border);border-radius:12px;padding:22px 24px}
 .hist-scroll{overflow:auto;max-height:620px;margin-top:4px;border-radius:8px;border:1px solid var(--border)}
-.hist-tbl thead{position:sticky;top:0;z-index:5}
+.hist-tbl thead{position:sticky;top:0;z-index:5;background:#f7f7f7;box-shadow:0 3px 6px rgba(0,0,0,.18)}
 .hist-tbl{width:100%;border-collapse:collapse;font-size:12px;white-space:nowrap}
 .hist-tbl thead th{padding:8px 10px;font-size:11px;font-weight:600;text-align:center;border-bottom:1px solid var(--border);border-right:1px solid rgba(255,255,255,.15)}
 .hist-tbl thead .sec-hdr-main{background:var(--d);color:#fff}
@@ -252,7 +252,7 @@ tbody td:first-child{font-weight:600;color:var(--d)}
 .hist-tbl thead .sec-hdr-demand{background:#1B4A31;color:#fff}
 .hist-tbl thead .sec-hdr-pricing{background:#2A3F32;color:#fff}
 .hist-tbl thead .sec-hdr-quality{background:#0A3D22;color:#fff}
-.hist-tbl thead .metric-hdr{background:#f7f7f7;color:var(--d);font-size:10px;letter-spacing:.3px;border-top:none;border-right:1px solid var(--border);min-width:52px;white-space:nowrap}
+.hist-tbl thead .metric-hdr{background:#f7f7f7;color:var(--d);font-size:10px;letter-spacing:.3px;border-top:none;border-right:1px solid var(--border);min-width:52px;white-space:nowrap;position:relative;z-index:6}
 .hist-tbl thead .period-hdr{background:var(--d);color:#fff;text-align:left;border-right:2px solid #2A9C64;min-width:90px}
 .hist-tbl tbody tr:nth-child(odd){background:#FAFAFA}
 .hist-tbl tbody tr:hover{background:#F0FAF4}
@@ -266,9 +266,6 @@ tbody td:first-child{font-weight:600;color:var(--d)}
 .hist-tbl tbody td.hist-val{font-size:12px;color:var(--d);font-weight:500;padding-right:4px;border-right:none;min-width:52px;white-space:nowrap}
 .hist-tbl tbody td.hist-chg{font-size:11px;font-weight:600;padding-left:3px;border-right:2px solid #c8d8cc;min-width:46px;white-space:nowrap}
 .hist-tbl .chg-pos{color:#2A9C64}.hist-tbl .chg-neg{color:#c0392b}.hist-tbl .chg-nil{color:#aaa}
-.hist-tbl tbody tr.hist-ath{background:#FFFDE7!important;font-weight:600}
-.hist-tbl tbody tr.hist-ath td{border-bottom:2px solid #FFD600;color:#7A6000}
-.hist-tbl tbody tr.hist-ath td.hist-period{color:#7A6000;font-weight:700}
 
 @media(max-width:1200px){.sec-grid-6{grid-template-columns:repeat(3,1fr)}.sec-grid-5{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:1000px){.kpi-row{grid-template-columns:repeat(2,1fr)}}
@@ -1389,7 +1386,7 @@ function renderHistoricalTable(){
   for(const sec of HIST_COLS){
     th1+=`<th colspan="${sec.metrics.length*2}" class="metric-hdr ${sec.cls}">${sec.label}</th>`;
     for(const m of sec.metrics){
-      const _hcs=_hci%2===0?'':'background:rgba(0,0,0,0.04)';
+      const _hcs=_hci%2===0?'background:#f7f7f7':'background:#efefef';
       _hci++;
       th2+=`<th class="metric-hdr" style="font-weight:600;${_hcs}">${m.label}</th><th class="metric-hdr" style="color:#888;${_hcs}">${yoyMode?'YoY':'Δ%'}</th>`;
     }
@@ -1405,21 +1402,8 @@ function renderHistoricalTable(){
     totMap_ly=new Map([...byP_ly.keys()].map(pk=>[pk,buildMerged(byP_ly.get(pk))]));
   }
 
-  // ATH row (all-time high across ALL data, not just filtered range)
-  let athRow='<tr class="hist-ath"><td class="hist-day">⭐</td><td class="hist-period">All-Time High</td>';
-  let _athci=0;
-  for(const sec of HIST_COLS){
-    for(const m of sec.metrics){
-      const v=ATH[m.k];
-      const _acs=_athci%2===0?'':'background:rgba(255,214,0,0.10)';
-      _athci++;
-      athRow+=`<td class="hist-val" style="${_acs}" colspan="2">${fMetricAp(m.k,v)}</td>`;
-    }
-  }
-  athRow+='</tr>';
-
   // Tbody: oldest → newest
-  let tbody='<tbody>'+athRow;
+  let tbody='<tbody>';
   for(let i=0;i<periods.length;i++){
     const pk=periods[i];
     const cur=totMap.get(pk);
