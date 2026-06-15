@@ -840,7 +840,7 @@ function accVal(a,k){
     eph_b:a.o>0?a.eph_b_s/a.o:null,paid_util:a.o>0?a.paid_util_s/a.o:null,
     eutil:a.o>0?a.eutil_s/a.o:null,
     sc:a.sess>0?a.sc_s/a.sess:null,s2f:a.sess>0?a.s2f_s/a.sess:null,s2o:a.sess>0?a.s2o_s/a.sess:null,
-    o2f:a.sess>0?a.o2f_s/a.sess:null,oot:a.sess>0?a.oot_s/a.sess:null,
+    o2f:a.orders>0?a.f/a.orders*100:null,oot:a.sess>0?a.oot_s/a.sess:null,
     arp:a.f>0?a.arp_s/a.f:null,dist:a.f>0?a.dist_s/a.f:null,ppk:a.f>0?a.ppk_s/a.f:null,
     surge:a.f>0?a.surge_s/a.f:null,ata:a.f>0?a.ata_s/a.f:null,
     oar:a.oar_w>0?a.oar_s/a.oar_w:null,par:a.par_w>0?a.par_s/a.par_w:null,rpr:a.f>0?a.rpr_s/a.f:null,
