@@ -142,24 +142,21 @@ TMPL = r"""<!DOCTYPE html>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-:root{--g:#C60B1E;--d:#8B0015;--w:#fff;--b:#1a0005;--border:#E8D0D3;--t2:#7a3040;--bg:#FFF5F6;--cbg:#FFF0F1;--y:#FFC400}
+:root{--g:#2A9C64;--d:#0C2C1C;--w:#fff;--b:#111;--border:#e2e8f0;--t2:#64748b;--bg:#f8fafc;--cbg:#f1f5f9}
 body{font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;background:var(--bg);color:var(--b);font-size:14px}
 
 /* NAV */
-nav{background:linear-gradient(135deg,#8B0015 0%,#C60B1E 50%,#8B0015 100%);padding:0 28px;height:56px;display:flex;align-items:center;gap:14px;position:sticky;top:0;z-index:100;box-shadow:0 2px 12px rgba(198,11,30,.4)}
-.nav-logo{font-weight:800;font-size:21px;color:#FFC400;letter-spacing:-.5px;text-shadow:0 1px 3px rgba(0,0,0,.3)}
-.nav-dot{color:rgba(255,196,0,.5);font-size:18px}
+nav{background:#0C2C1C;padding:0 28px;height:56px;display:flex;align-items:center;gap:14px;position:sticky;top:0;z-index:100;box-shadow:0 2px 8px rgba(0,0,0,.25)}
+.nav-logo{font-weight:800;font-size:21px;color:#fff;letter-spacing:-.5px}
+.nav-dot{color:rgba(255,255,255,.4);font-size:18px}
 .nav-title{color:#fff;font-weight:500;font-size:15px;opacity:.9}
-.nav-badge{margin-left:auto;background:rgba(255,196,0,.2);color:#FFC400;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;border:1px solid rgba(255,196,0,.4)}
-/* Victory banner */
-.victory-banner{background:linear-gradient(90deg,#C60B1E,#8B0015,#C60B1E);color:#FFC400;text-align:center;padding:10px 20px;font-size:13px;font-weight:700;letter-spacing:.5px;display:flex;align-items:center;justify-content:center;gap:12px;border-bottom:3px solid #FFC400}
-.victory-flag{font-size:20px}
+.nav-badge{margin-left:auto;background:rgba(42,156,100,.2);color:#2A9C64;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;border:1px solid rgba(42,156,100,.4)}
 
 /* LAYOUT */
 .main{max-width:1440px;margin:0 auto;padding:20px 24px;display:flex;flex-direction:column;gap:16px}
 
 /* FILTER BAR */
-.filter-bar{background:var(--w);border:1px solid var(--border);border-radius:12px;padding:16px 20px;display:flex;flex-wrap:wrap;gap:20px;align-items:flex-start;position:sticky;top:96px;z-index:99;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+.filter-bar{background:var(--w);border:1px solid var(--border);border-radius:12px;padding:16px 20px;display:flex;flex-wrap:wrap;gap:20px;align-items:flex-start;position:sticky;top:56px;z-index:99;box-shadow:0 2px 8px rgba(0,0,0,.06)}
 .filter-group{display:flex;flex-direction:column;gap:8px}
 .filter-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--d)}
 .pills{display:flex;flex-wrap:wrap;gap:5px;align-items:center}
@@ -190,7 +187,7 @@ nav{background:linear-gradient(135deg,#8B0015 0%,#C60B1E 50%,#8B0015 100%);paddi
 .kpi-val{font-size:28px;font-weight:800;color:var(--d);line-height:1;letter-spacing:-.5px}
 .kpi-period{font-size:11px;color:var(--t2);margin-top:5px;font-weight:500}
 .kpi-sub{margin-top:6px;font-size:12px;font-weight:500}
-.kpi-up{color:#C60B1E} .kpi-dn{color:#999}
+.kpi-up{color:#2A9C64} .kpi-dn{color:#c0392b}
 
 /* METRIC SECTIONS */
 .sec-section{background:var(--w);border:1px solid var(--border);border-radius:12px;padding:18px 20px}
@@ -328,13 +325,6 @@ tbody td:first-child{font-weight:600;color:var(--d)}
   <span class="nav-title">City Performance Dashboard</span>
   <span class="nav-badge" id="nav-badge">Loading…</span>
 </nav>
-<div class="victory-banner">
-  <span class="victory-flag">🇪🇸</span>
-  ¡ESPAÑA CAMPEONA DEL MUNDO 2026! &nbsp;·&nbsp; ¡A por ellos, oé!
-  <span class="victory-flag">🏆</span>
-  <span class="victory-flag">⚽</span>
-  <span class="victory-flag">🇪🇸</span>
-</div>
 <div class="main">
 
   <!-- FILTERS -->
