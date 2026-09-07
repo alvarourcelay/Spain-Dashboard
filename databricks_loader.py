@@ -59,8 +59,8 @@ SELECT
   -- ar_in_wsum = SUM(rate_inside_SR × tries_inside_SR): weighted accepted count inside SR
   SUM(CAST(na.rides_order_try_nonoptional_acceptance_rate_local AS DOUBLE) * a.rides_order_tries_nonoptional_created_local) AS ar_in_wsum
 
-FROM hive_metastore.mart_models_spark.mart_city_hour_local_rides a
-LEFT JOIN hive_metastore.mart_models_spark.mart_non_additive_city_hour_local_rides na
+FROM hive_metastore.mart_models.mart_city_hour_local_rides a
+LEFT JOIN hive_metastore.mart_models.mart_non_additive_city_hour_local_rides na
   ON a.city_id        = na.city_id
  AND a.date_hour_ts_local = na.date_hour_ts_local
 WHERE a.country_name = 'Spain'
